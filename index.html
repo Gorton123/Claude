@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EarthView — 2025 High-Fidelity Globe</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Top bar -->
+  <header id="topbar">
+    <div id="logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <circle cx="14" cy="14" r="13" stroke="#4fc3f7" stroke-width="1.5"/>
+        <ellipse cx="14" cy="14" rx="6" ry="13" stroke="#4fc3f7" stroke-width="1"/>
+        <line x1="1" y1="14" x2="27" y2="14" stroke="#4fc3f7" stroke-width="1"/>
+        <line x1="2" y1="8" x2="26" y2="8" stroke="#4fc3f7" stroke-width="0.8"/>
+        <line x1="2" y1="20" x2="26" y2="20" stroke="#4fc3f7" stroke-width="0.8"/>
+      </svg>
+      <span>EarthView</span>
+    </div>
+
+    <div id="search-wrapper">
+      <input id="search-input" type="text" placeholder="Search location, coordinates…" autocomplete="off" />
+      <button id="search-btn" title="Search">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="6.5" cy="6.5" r="5" stroke="white" stroke-width="1.5"/>
+          <line x1="10.5" y1="10.5" x2="14.5" y2="14.5" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div id="search-results"></div>
+    </div>
+
+    <div id="header-actions">
+      <button class="hdr-btn" id="btn-layers" title="Layer selector">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="3" width="14" height="2" rx="1" fill="white"/>
+          <rect x="1" y="7" width="14" height="2" rx="1" fill="white"/>
+          <rect x="1" y="11" width="14" height="2" rx="1" fill="white"/>
+        </svg>
+        Layers
+      </button>
+      <button class="hdr-btn" id="btn-home" title="Reset view">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M8 2L2 7v7h4v-4h4v4h4V7L8 2z" stroke="white" stroke-width="1.2" fill="none"/>
+        </svg>
+        Reset
+      </button>
+    </div>
+  </header>
+
+  <!-- Main canvas -->
+  <canvas id="earth-canvas"></canvas>
+
+  <!-- Layer panel -->
+  <aside id="layer-panel" class="panel hidden">
+    <h3>Map Layers</h3>
+    <label class="layer-row"><input type="radio" name="base" value="satellite" checked /> Satellite (2025)</label>
+    <label class="layer-row"><input type="radio" name="base" value="topo" /> Topographic</label>
+    <label class="layer-row"><input type="radio" name="base" value="night" /> City Lights</label>
+    <hr/>
+    <label class="layer-row"><input type="checkbox" id="tog-clouds" checked /> Clouds</label>
+    <label class="layer-row"><input type="checkbox" id="tog-atmosphere" checked /> Atmosphere</label>
+    <label class="layer-row"><input type="checkbox" id="tog-terminator" checked /> Day/Night</label>
+    <label class="layer-row"><input type="checkbox" id="tog-grid" /> Lat/Lon Grid</label>
+    <label class="layer-row"><input type="checkbox" id="tog-cities" /> Major Cities</label>
+    <label class="layer-row"><input type="checkbox" id="tog-rotate" checked /> Auto-Rotate</label>
+  </aside>
+
+  <!-- Info overlay -->
+  <div id="info-panel">
+    <div id="coord-display">
+      <span id="lat-display">Lat: —</span>
+      <span id="lon-display">Lon: —</span>
+      <span id="alt-display">Alt: —</span>
+    </div>
+    <div id="time-display"></div>
+  </div>
+
+  <!-- Zoom controls -->
+  <div id="zoom-controls">
+    <button id="zoom-in"  title="Zoom in">+</button>
+    <div id="zoom-slider-wrap">
+      <input type="range" id="zoom-slider" min="1.15" max="10" step="0.05" value="2.5" orient="vertical" />
+    </div>
+    <button id="zoom-out" title="Zoom out">−</button>
+  </div>
+
+  <!-- Compass -->
+  <div id="compass" title="Reset north">
+    <svg id="compass-svg" width="44" height="44" viewBox="0 0 44 44">
+      <circle cx="22" cy="22" r="20" stroke="#ffffff22" stroke-width="1" fill="#0006"/>
+      <polygon id="compass-north" points="22,4 19,22 25,22" fill="#ef5350"/>
+      <polygon id="compass-south" points="22,40 19,22 25,22" fill="#90a4ae"/>
+      <circle cx="22" cy="22" r="3" fill="white"/>
+    </svg>
+    <span id="compass-label">N</span>
+  </div>
+
+  <!-- Location pin tooltip -->
+  <div id="pin-tooltip" class="hidden">
+    <div id="pin-name"></div>
+    <div id="pin-coords"></div>
+    <button id="pin-close">✕</button>
+  </div>
+
+  <!-- Loading screen -->
+  <div id="loading-screen">
+    <div id="loading-globe">
+      <svg width="80" height="80" viewBox="0 0 80 80" fill="none">
+        <circle cx="40" cy="40" r="36" stroke="#4fc3f7" stroke-width="2" stroke-dasharray="8 4"/>
+        <ellipse cx="40" cy="40" rx="16" ry="36" stroke="#4fc3f7" stroke-width="1.5"/>
+        <line x1="4" y1="40" x2="76" y2="40" stroke="#4fc3f7" stroke-width="1.5"/>
+      </svg>
+    </div>
+    <p id="loading-text">Loading EarthView…</p>
+    <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
+  </div>
+
+  <!-- Three.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
