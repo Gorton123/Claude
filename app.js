@@ -7,20 +7,88 @@
 
 /* ─────────────────────────────────────────────────────────────
    1. TEXTURE SOURCES
-   Using NASA Blue Marble + NOAA ETOPO data from public CDNs
+   Primary: unpkg.com (npm CDN — highly reliable, no CORS issues)
+   Fallback: procedural canvas textures generated in-browser
 ───────────────────────────────────────────────────────────── */
+const UNPKG = 'https://unpkg.com/three@0.165.0/examples/textures/planets/';
 const TEX = {
-  // NASA Blue Marble 2004 (8192×4096) via publicly hosted mirror
-  satellite:    'https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74117/world.200408.3x5400x2700.jpg',
-  // Fallback lower-res via unpkg-hosted Three.js example textures
-  satelliteFB:  'https://threejs.org/examples/textures/planets/earth_atmos_2048.jpg',
-  topoBump:     'https://threejs.org/examples/textures/planets/earth_normal_2048.jpg',
-  specular:     'https://threejs.org/examples/textures/planets/earth_specular_2048.jpg',
-  clouds:       'https://threejs.org/examples/textures/planets/earth_clouds_1024.png',
-  // NASA city lights (night)
-  nightLights:  'https://eoimages.gsfc.nasa.gov/images/imagerecords/55000/55167/earth_lights_lrg.jpg',
-  nightFB:      'https://threejs.org/examples/textures/planets/earth_lights_2048.png',
+  satellite:   UNPKG + 'earth_atmos_2048.jpg',
+  topoBump:    UNPKG + 'earth_normal_2048.jpg',
+  specular:    UNPKG + 'earth_specular_2048.jpg',
+  clouds:      UNPKG + 'earth_clouds_1024.png',
+  nightLights: UNPKG + 'earth_lights_2048.png',
 };
+
+/* ── Procedural fallback textures (canvas-drawn, zero network) ── */
+function makeProceduralEarth() {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = 512;
+  const ctx = c.getContext('2d');
+  // Ocean base
+  const ocean = ctx.createLinearGradient(0, 0, 0, 512);
+  ocean.addColorStop(0,   '#1a3d6e');
+  ocean.addColorStop(0.5, '#1e5799');
+  ocean.addColorStop(1,   '#1a3d6e');
+  ctx.fillStyle = ocean; ctx.fillRect(0, 0, 1024, 512);
+  // Simple continent shapes (rough approximations)
+  ctx.fillStyle = '#3a7a3a';
+  // Africa
+  ctx.beginPath(); ctx.ellipse(540, 290, 65, 100, 0.1, 0, Math.PI*2); ctx.fill();
+  // Europe
+  ctx.beginPath(); ctx.ellipse(510, 180, 40, 35, -0.3, 0, Math.PI*2); ctx.fill();
+  // Asia
+  ctx.beginPath(); ctx.ellipse(660, 210, 130, 80, 0.1, 0, Math.PI*2); ctx.fill();
+  // North America
+  ctx.beginPath(); ctx.ellipse(200, 220, 90, 90, 0.2, 0, Math.PI*2); ctx.fill();
+  // South America
+  ctx.beginPath(); ctx.ellipse(270, 360, 50, 80, 0.1, 0, Math.PI*2); ctx.fill();
+  // Australia
+  ctx.beginPath(); ctx.ellipse(760, 360, 55, 40, 0.1, 0, Math.PI*2); ctx.fill();
+  // Antarctica
+  ctx.fillStyle = '#e8f4ff';
+  ctx.beginPath(); ctx.ellipse(512, 495, 200, 25, 0, 0, Math.PI*2); ctx.fill();
+  // Arctic
+  ctx.beginPath(); ctx.ellipse(512, 15, 200, 20, 0, 0, Math.PI*2); ctx.fill();
+  const tex = new THREE.CanvasTexture(c);
+  return tex;
+}
+
+function makeProceduralNight() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#000005'; ctx.fillRect(0, 0, 512, 256);
+  // Scattered city lights
+  const lights = [
+    [200,95],[195,90],[260,90],[290,95],[310,80],[450,100],[480,110],
+    [540,88],[600,110],[540,140],[200,150],[250,170],[195,100],
+  ];
+  lights.forEach(([x, y]) => {
+    for (let i = 0; i < 18; i++) {
+      const lx = x + (Math.random()-0.5)*30;
+      const ly = y + (Math.random()-0.5)*15;
+      ctx.fillStyle = `rgba(255,220,120,${0.3+Math.random()*0.5})`;
+      ctx.fillRect(lx, ly, 1.5, 1.5);
+    }
+  });
+  return new THREE.CanvasTexture(c);
+}
+
+function makeProceduralClouds() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'transparent'; ctx.clearRect(0, 0, 512, 256);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 256;
+    ctx.beginPath();
+    ctx.ellipse(x, y, 20 + Math.random()*40, 8 + Math.random()*14, Math.random(), 0, Math.PI*2);
+    ctx.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
 
 /* ─────────────────────────────────────────────────────────────
    2. SCENE SETUP
@@ -96,14 +164,28 @@ function onTexLoaded() {
   loadBar.style.width = `${(loadCount / loadTotal) * 100}%`;
 }
 
-function loadTex(primary, fallback) {
+function loadTex(url, makeFallback) {
   return new Promise(resolve => {
+    // 8-second per-texture timeout
+    const timer = setTimeout(() => {
+      console.warn('Texture timeout:', url, '— using procedural fallback');
+      onTexLoaded();
+      resolve(makeFallback ? makeFallback() : null);
+    }, 8000);
+
     loader.load(
-      primary,
-      tex => { onTexLoaded(); resolve(tex); },
+      url,
+      tex => {
+        clearTimeout(timer);
+        onTexLoaded();
+        resolve(tex);
+      },
       undefined,
-      () => {
-        loader.load(fallback || primary, tex => { onTexLoaded(); resolve(tex); });
+      err => {
+        clearTimeout(timer);
+        console.warn('Texture failed:', url, err);
+        onTexLoaded();
+        resolve(makeFallback ? makeFallback() : null);
       }
     );
   });
@@ -133,11 +215,11 @@ const state = {
 
 async function buildEarth() {
   const [satTex, bumpTex, specTex, cloudTex, nightTex] = await Promise.all([
-    loadTex(TEX.satellite,   TEX.satelliteFB),
-    loadTex(TEX.topoBump,    TEX.topoBump),
-    loadTex(TEX.specular,    TEX.specular),
-    loadTex(TEX.clouds,      TEX.clouds),
-    loadTex(TEX.nightLights, TEX.nightFB),
+    loadTex(TEX.satellite,   makeProceduralEarth),
+    loadTex(TEX.topoBump,    null),
+    loadTex(TEX.specular,    null),
+    loadTex(TEX.clouds,      makeProceduralClouds),
+    loadTex(TEX.nightLights, makeProceduralNight),
   ]);
 
   // Store textures for layer switching
@@ -148,10 +230,10 @@ async function buildEarth() {
 
   // ── Earth surface ──
   const earthMat = new THREE.MeshPhongMaterial({
-    map:         satTex,
-    bumpMap:     bumpTex,
+    map:         satTex || makeProceduralEarth(),
+    bumpMap:     bumpTex   || undefined,
     bumpScale:   0.012,
-    specularMap: specTex,
+    specularMap: specTex   || undefined,
     specular:    new THREE.Color(0x2a4a6a),
     shininess:   18,
   });
