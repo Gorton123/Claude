@@ -845,3 +845,222 @@ document.addEventListener('keydown', e => {
 ───────────────────────────────────────────────────────────── */
 computeSunPosition();
 buildEarth();
+
+/* ─────────────────────────────────────────────────────────────
+   23. QUANTUM AI
+───────────────────────────────────────────────────────────── */
+
+const QUANTUM_API  = 'http://localhost:8000';
+const quantumGroup = new THREE.Group();
+scene.add(quantumGroup);
+
+let qActiveScenario = 'energy';
+let qRunning        = false;
+
+// ── Scenario button selection ─────────────────────────────────
+document.querySelectorAll('.q-scenario-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.q-scenario-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    qActiveScenario = btn.dataset.scenario;
+  });
+});
+
+// ── Collapse / expand panel ───────────────────────────────────
+document.getElementById('quantum-collapse').addEventListener('click', () => {
+  const body = document.getElementById('quantum-body');
+  const btn  = document.getElementById('quantum-collapse');
+  const isHidden = body.style.display === 'none';
+  body.style.display = isHidden ? '' : 'none';
+  btn.textContent    = isHidden ? '−' : '+';
+});
+
+// ── Run button ────────────────────────────────────────────────
+document.getElementById('q-run-btn').addEventListener('click', qRunAnalysis);
+
+// ── Clear previous quantum layer ──────────────────────────────
+function qClearLayer() {
+  while (quantumGroup.children.length) {
+    const child = quantumGroup.children[0];
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) child.material.dispose();
+    quantumGroup.remove(child);
+  }
+}
+
+// ── Visualise energy optimizer results (QAOA) ─────────────────
+function qRenderEnergy(sites) {
+  const coreGeo = new THREE.SphereGeometry(0.014, 10, 10);
+  const haloGeo = new THREE.SphereGeometry(0.026, 10, 10);
+
+  sites.forEach(site => {
+    const pos = latLonToVec3(site.lat, site.lon, EARTH_RADIUS + 0.012);
+    const scaleFactor = 1.0 + Math.max(0, (site.score - 1.0)) * 0.6;
+
+    const core = new THREE.Mesh(coreGeo,
+      new THREE.MeshBasicMaterial({ color: 0x69f0ae }));
+    core.position.copy(pos);
+    core.scale.setScalar(scaleFactor);
+    core.userData.pulse  = true;
+    core.userData.baseScale = scaleFactor;
+    quantumGroup.add(core);
+
+    const halo = new THREE.Mesh(haloGeo,
+      new THREE.MeshBasicMaterial({ color: 0x00e676, transparent: true, opacity: 0.22, side: THREE.BackSide }));
+    halo.position.copy(pos);
+    halo.scale.setScalar(scaleFactor);
+    quantumGroup.add(halo);
+  });
+}
+
+// ── Visualise climate anomaly scan results (VQC) ──────────────
+function qRenderClimate(cells) {
+  const geo = new THREE.SphereGeometry(0.018, 6, 6);
+
+  cells.forEach(cell => {
+    let colour;
+    if      (cell.label === 'critical') colour = new THREE.Color().setHSL(0.0,  0.9, 0.48 + cell.severity * 0.18);
+    else if (cell.label === 'warning')  colour = new THREE.Color(0xff9800);
+    else                                colour = new THREE.Color(0x4fc3f7);
+
+    const mesh = new THREE.Mesh(geo.clone(),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.72 }));
+    const pos = latLonToVec3(cell.lat, cell.lon, EARTH_RADIUS + 0.011);
+    mesh.position.copy(pos);
+    mesh.userData.pulse     = cell.label === 'critical';
+    mesh.userData.baseScale = 1.0;
+    quantumGroup.add(mesh);
+  });
+  geo.dispose();
+}
+
+// ── Visualise disaster relief routes (QAOA arcs) ─────────────
+function qRenderDisaster(routes) {
+  routes.forEach(route => {
+    const vDepot = latLonToVec3(route.depot.lat, route.depot.lon, EARTH_RADIUS + 0.012);
+    const vZone  = latLonToVec3(route.zone.lat,  route.zone.lon,  EARTH_RADIUS + 0.012);
+
+    // Curved arc via elevated midpoint
+    const mid = vDepot.clone().add(vZone).multiplyScalar(0.5)
+                        .normalize().multiplyScalar(EARTH_RADIUS + 0.38);
+    const pts    = new THREE.QuadraticBezierCurve3(vDepot, mid, vZone).getPoints(50);
+    const arcGeo = new THREE.BufferGeometry().setFromPoints(pts);
+    quantumGroup.add(new THREE.Line(arcGeo,
+      new THREE.LineBasicMaterial({ color: 0xffcc02, transparent: true, opacity: 0.88 })));
+
+    // Depot dot (blue)
+    const depMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.016, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0x42a5f5 }));
+    depMesh.position.copy(vDepot);
+    depMesh.userData.pulse = true; depMesh.userData.baseScale = 1.0;
+    quantumGroup.add(depMesh);
+
+    // Zone dot (red)
+    const zonMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.016, 8, 8),
+      new THREE.MeshBasicMaterial({ color: 0xef5350 }));
+    zonMesh.position.copy(vZone);
+    zonMesh.userData.pulse = true; zonMesh.userData.baseScale = 1.0;
+    quantumGroup.add(zonMesh);
+  });
+}
+
+// ── Show result summary in panel ──────────────────────────────
+function qShowResult(data) {
+  document.getElementById('q-result-algo').textContent = data.algorithm || '';
+  document.getElementById('q-result-desc').textContent = data.description || '';
+
+  let statsHtml = '';
+  if (data.scenario === 'climate') {
+    const c = data.counts;
+    statsHtml = `<span class="q-stat-normal">${c.normal} normal</span> &middot; ` +
+                `<span class="q-stat-warn">${c.warning} warning</span> &middot; ` +
+                `<span class="q-stat-crit">${c.critical} critical</span>`;
+  } else if (data.scenario === 'energy') {
+    statsHtml = `${data.sites.length} optimal sites identified`;
+  } else {
+    statsHtml = `${data.routes.length} optimised relief routes`;
+  }
+  document.getElementById('q-result-stats').innerHTML = statsHtml;
+  document.getElementById('q-result-box').classList.remove('hidden');
+}
+
+// ── Fly to selected region ────────────────────────────────────
+const Q_REGION_VIEWS = {
+  africa:   { lat:  0.0, lon:  20.0, dist: 2.8 },
+  europe:   { lat: 52.0, lon:  15.0, dist: 2.4 },
+  asia:     { lat: 30.0, lon: 100.0, dist: 2.8 },
+  americas: { lat: 10.0, lon: -80.0, dist: 3.0 },
+  global:   { lat:  0.0, lon:   0.0, dist: 3.5 },
+};
+
+function qFlyToRegion(region) {
+  const v = Q_REGION_VIEWS[region] || Q_REGION_VIEWS.global;
+  flyTo(v.lat, v.lon, v.dist);
+}
+
+// ── Main analysis orchestrator ────────────────────────────────
+async function qRunAnalysis() {
+  if (qRunning) return;
+  qRunning = true;
+
+  const region    = document.getElementById('q-region').value;
+  const btnText   = document.getElementById('q-btn-text');
+  const spinner   = document.getElementById('q-spinner');
+  const resultBox = document.getElementById('q-result-box');
+
+  btnText.textContent = 'Processing…';
+  spinner.classList.remove('hidden');
+  resultBox.classList.add('hidden');
+  qClearLayer();
+
+  try {
+    let data;
+    if (qActiveScenario === 'climate') {
+      const res = await fetch(`${QUANTUM_API}/api/climate`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ region, resolution: 8 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      qRenderClimate(data.cells);
+    } else {
+      const res = await fetch(`${QUANTUM_API}/api/optimize`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ scenario: qActiveScenario, region, n_sites: 8 }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+      if (qActiveScenario === 'energy') qRenderEnergy(data.sites);
+      else                              qRenderDisaster(data.routes);
+    }
+    qShowResult(data);
+    qFlyToRegion(region);
+  } catch (_err) {
+    document.getElementById('q-result-algo').textContent = 'Connection error';
+    document.getElementById('q-result-desc').textContent =
+      'Start the backend first: python server.py';
+    document.getElementById('q-result-stats').textContent = '';
+    resultBox.classList.remove('hidden');
+  } finally {
+    btnText.textContent = 'Run Quantum Analysis';
+    spinner.classList.add('hidden');
+    qRunning = false;
+  }
+}
+
+// ── Pulse animation loop (independent of Three.js clock) ──────
+(function qAnimLoop() {
+  const t = performance.now() / 1000;
+  const s = 1.0 + 0.16 * Math.sin(t * 3.4);
+  quantumGroup.children.forEach(obj => {
+    if (obj.userData && obj.userData.pulse) {
+      const base = obj.userData.baseScale || 1.0;
+      obj.scale.setScalar(base * s);
+    }
+  });
+  requestAnimationFrame(qAnimLoop);
+}());

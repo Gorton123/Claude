@@ -351,3 +351,158 @@ html, body {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ===== Quantum AI Panel ===== */
+#quantum-panel {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 240px;
+  background: var(--surface);
+  border: 1px solid rgba(79,195,247,0.28);
+  border-radius: var(--radius);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.45), 0 0 0 1px rgba(79,195,247,0.08);
+  z-index: 200;
+  overflow: hidden;
+}
+
+#quantum-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(79,195,247,0.08);
+  border-bottom: 1px solid rgba(79,195,247,0.15);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+#quantum-header span { flex: 1; }
+
+#quantum-collapse {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+#quantum-collapse:hover { color: var(--accent); }
+
+#quantum-body {
+  padding: 10px 12px 12px;
+}
+
+.q-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 8px 0 4px;
+}
+.q-label:first-child { margin-top: 0; }
+
+/* Scenario buttons */
+#q-scenario-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.q-scenario-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 6px 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.q-scenario-btn:hover { background: rgba(79,195,247,0.1); }
+.q-scenario-btn.active {
+  background: rgba(79,195,247,0.14);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.q-icon { margin-right: 4px; }
+
+/* Region select */
+#q-region {
+  width: 100%;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 5px 8px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#q-region:focus { border-color: var(--accent); }
+
+/* Run button */
+#q-run-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 8px;
+  background: linear-gradient(135deg, rgba(25,118,210,0.75), rgba(79,195,247,0.6));
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: opacity 0.15s, transform 0.1s;
+}
+#q-run-btn:hover  { opacity: 0.9; }
+#q-run-btn:active { transform: scale(0.98); }
+
+/* Spinner */
+#q-spinner {
+  display: inline-block;
+  animation: qSpin 0.7s linear infinite;
+}
+@keyframes qSpin { to { transform: rotate(360deg); } }
+
+/* Result box */
+#q-result-box {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid rgba(79,195,247,0.12);
+  border-radius: 6px;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+#q-result-algo {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 10px;
+  margin-bottom: 4px;
+}
+
+#q-result-desc {
+  color: var(--text);
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+
+#q-result-stats { font-size: 10px; }
+.q-stat-normal { color: #4fc3f7; }
+.q-stat-warn   { color: #ff9800; }
+.q-stat-crit   { color: #ef5350; }

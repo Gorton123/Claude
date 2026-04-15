@@ -1,0 +1,5 @@
+pennylane>=0.36.0
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+numpy>=1.26.0
+scipy>=1.13.0
