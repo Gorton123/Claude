@@ -848,9 +848,10 @@ buildEarth();
 
 /* ─────────────────────────────────────────────────────────────
    23. QUANTUM AI
+   Runs entirely in the browser via quantum_sim.js +
+   quantum_algorithms.js — no server or installation required.
 ───────────────────────────────────────────────────────────── */
 
-const QUANTUM_API  = 'http://localhost:8000';
 const quantumGroup = new THREE.Group();
 scene.add(quantumGroup);
 
@@ -901,7 +902,7 @@ function qRenderEnergy(sites) {
       new THREE.MeshBasicMaterial({ color: 0x69f0ae }));
     core.position.copy(pos);
     core.scale.setScalar(scaleFactor);
-    core.userData.pulse  = true;
+    core.userData.pulse     = true;
     core.userData.baseScale = scaleFactor;
     quantumGroup.add(core);
 
@@ -1015,34 +1016,26 @@ async function qRunAnalysis() {
   resultBox.classList.add('hidden');
   qClearLayer();
 
+  // Yield to the browser so the spinner renders before computation starts
+  await new Promise(r => setTimeout(r, 30));
+
   try {
     let data;
     if (qActiveScenario === 'climate') {
-      const res = await fetch(`${QUANTUM_API}/api/climate`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ region, resolution: 8 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      data = await res.json();
+      data = climateScan(region, 8);          // VQC — quantum_algorithms.js
       qRenderClimate(data.cells);
+    } else if (qActiveScenario === 'energy') {
+      data = energyOptimizer(region, 8);      // QAOA — quantum_algorithms.js
+      qRenderEnergy(data.sites);
     } else {
-      const res = await fetch(`${QUANTUM_API}/api/optimize`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ scenario: qActiveScenario, region, n_sites: 8 }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      data = await res.json();
-      if (qActiveScenario === 'energy') qRenderEnergy(data.sites);
-      else                              qRenderDisaster(data.routes);
+      data = disasterRouter(region, 6);       // QAOA — quantum_algorithms.js
+      qRenderDisaster(data.routes);
     }
     qShowResult(data);
     qFlyToRegion(region);
-  } catch (_err) {
-    document.getElementById('q-result-algo').textContent = 'Connection error';
-    document.getElementById('q-result-desc').textContent =
-      'Start the backend first: python server.py';
+  } catch (err) {
+    document.getElementById('q-result-algo').textContent = 'Error';
+    document.getElementById('q-result-desc').textContent = err.message || 'Unexpected error.';
     document.getElementById('q-result-stats').textContent = '';
     resultBox.classList.remove('hidden');
   } finally {
