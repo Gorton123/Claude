@@ -379,3 +379,172 @@ window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.inn
 
 // ── BOOT ──
 try { buildEarth(); } catch(e) { window.onerror(e.message || String(e)); }
+
+// ════════════════════════════════════════════════
+// STREET MAP PANEL (Leaflet + OSM + Historical)
+// ════════════════════════════════════════════════
+let leafMap = null;
+let baseTileLayer = null;
+let currentYear = 2024;
+let currentMapType = 'sat';
+let waybackReleases = {}; // year → releaseId
+
+// Esri Wayback release IDs (fetched once on first open)
+async function fetchWaybackReleases() {
+  try {
+    const r = await fetch('https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json');
+    const data = await r.json();
+    // Group releases by year, keep most recent per year
+    data.forEach(rel => {
+      const yr = new Date(rel.releaseDatetime).getFullYear();
+      if (!waybackReleases[yr]) waybackReleases[yr] = rel.releaseNum;
+    });
+    document.getElementById('year-note').textContent = '';
+  } catch(e) {
+    document.getElementById('year-note').textContent = '(offline)';
+  }
+}
+
+function getTileUrl(year, type) {
+  if (type === 'osm') return 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+  // Satellite
+  if (year >= 2024) return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+  const rel = waybackReleases[year];
+  if (rel) return `https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/${rel}/{z}/{y}/{x}`;
+  return 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+}
+
+function getAttrib(type) {
+  if (type === 'osm') return '© <a href="https://openstreetmap.org">OpenStreetMap</a> contributors';
+  return '© <a href="https://www.esri.com">Esri</a>, Maxar, Earthstar Geographics';
+}
+
+function updateMapTiles() {
+  if (!leafMap) return;
+  if (baseTileLayer) leafMap.removeLayer(baseTileLayer);
+  baseTileLayer = L.tileLayer(getTileUrl(currentYear, currentMapType), {
+    attribution: getAttrib(currentMapType),
+    maxZoom: 19,
+    subdomains: currentMapType === 'osm' ? 'abc' : undefined,
+  }).addTo(leafMap);
+}
+
+function openMapPanel(lat, lon, label) {
+  fetchWaybackReleases();
+  document.getElementById('map-panel').classList.add('visible');
+  document.getElementById('map-location-label').textContent = label || `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+
+  if (!leafMap) {
+    leafMap = L.map('map-leaflet', { zoomControl: true }).setView([lat, lon], 15);
+    updateMapTiles();
+    // Label overlay for OSM
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      opacity: 0,
+      attribution: '',
+      id: 'label-layer'
+    }).addTo(leafMap);
+  } else {
+    leafMap.setView([lat, lon], 15);
+    updateMapTiles();
+  }
+  // Invalidate size after panel animates in
+  setTimeout(() => leafMap && leafMap.invalidateSize(), 100);
+}
+
+function closeMapPanel() {
+  document.getElementById('map-panel').classList.remove('visible');
+}
+
+// Map type toggle
+document.querySelectorAll('input[name="maplayer"]').forEach(r => {
+  r.addEventListener('change', () => { currentMapType = r.value; updateMapTiles(); });
+});
+
+// Close button
+document.getElementById('map-close-btn').addEventListener('click', closeMapPanel);
+
+// Year slider
+const yearSlider = document.getElementById('year-slider');
+const yearVal = document.getElementById('year-val');
+yearSlider.addEventListener('input', () => {
+  currentYear = parseInt(yearSlider.value);
+  yearVal.textContent = currentYear;
+  updateMapTiles();
+});
+
+// ════════════════════════════════════════════════
+// NOMINATIM FULL ADDRESS SEARCH (replaces simple search)
+// ════════════════════════════════════════════════
+const searchInput2 = document.getElementById('search-input');
+const searchResults2 = document.getElementById('search-results');
+let searchTimer = null;
+
+searchInput2.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput2.value.trim();
+  if (q.length < 3) { searchResults2.classList.remove('visible'); return; }
+  searchResults2.innerHTML = '<div class="search-item" style="color:var(--muted)">Searching…</div>';
+  searchResults2.classList.add('visible');
+  searchTimer = setTimeout(() => nominatimSearch(q), 400);
+});
+
+async function nominatimSearch(q) {
+  // Coordinate shortcut
+  const cm = q.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if (cm) { renderResults([{name:`${cm[1]}°, ${cm[2]}°`, sub:'Coordinates', lat:+cm[1], lon:+cm[2]}]); return; }
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=8&addressdetails=1`;
+    const resp = await fetch(url, { headers: {'Accept-Language':'en'} });
+    const data = await resp.json();
+    if (!data.length) { renderResults([]); return; }
+    renderResults(data.map(r => ({
+      name: r.display_name.split(',')[0].trim(),
+      sub: r.display_name.split(',').slice(1,3).join(',').trim(),
+      lat: parseFloat(r.lat),
+      lon: parseFloat(r.lon),
+      full: r.display_name
+    })));
+  } catch(e) { renderResults([]); }
+}
+
+function renderResults(res) {
+  if (!res.length) {
+    searchResults2.innerHTML = '<div class="search-item" style="color:var(--muted)">No results found</div>';
+    return;
+  }
+  searchResults2.innerHTML = res.map((r,i) =>
+    `<div class="search-item" data-i="${i}"><div class="search-item-name">${r.name}</div><div class="search-item-sub">${r.sub}</div></div>`
+  ).join('');
+  searchResults2._results = res;
+  searchResults2.querySelectorAll('.search-item[data-i]').forEach(el => {
+    el.addEventListener('click', () => {
+      const r = searchResults2._results[+el.dataset.i];
+      searchInput2.value = r.name;
+      searchResults2.classList.remove('visible');
+      // Fly globe to location
+      flyTo(r.lat, r.lon, 1.5);
+      // Open street map panel
+      openMapPanel(r.lat, r.lon, r.name);
+    });
+  });
+}
+
+document.getElementById('search-btn').addEventListener('click', () => {
+  if (searchInput2.value.trim().length >= 3) nominatimSearch(searchInput2.value.trim());
+});
+searchInput2.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && searchInput2.value.trim().length >= 3) nominatimSearch(searchInput2.value.trim());
+  if (e.key === 'Escape') searchResults2.classList.remove('visible');
+});
+document.addEventListener('click', e => {
+  if (!e.target.closest('#search-wrapper')) searchResults2.classList.remove('visible');
+});
+
+// Auto-open map panel when zoomed in close on globe
+setInterval(() => {
+  if (dist < 1.25 && !document.getElementById('map-panel').classList.contains('visible')) {
+    const lat = Math.asin(camera.position.y / dist) * (180/Math.PI);
+    const lon = Math.atan2(camera.position.x, camera.position.z) * (180/Math.PI);
+    openMapPanel(lat, lon, `${lat.toFixed(3)}°, ${lon.toFixed(3)}°`);
+  }
+}, 1500);

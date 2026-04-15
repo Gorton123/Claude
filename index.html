@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EarthView — 2025 High-Fidelity Globe</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -104,6 +105,26 @@
     <button id="pin-close">✕</button>
   </div>
 
+  <!-- Street map panel (shown when zoomed in or after address search) -->
+  <div id="map-panel">
+    <div id="map-topbar">
+      <span id="map-location-label">Street Map</span>
+      <div id="map-controls">
+        <label class="map-toggle"><input type="radio" name="maplayer" value="osm" id="ml-osm"/> Roads</label>
+        <label class="map-toggle"><input type="radio" name="maplayer" value="sat" id="ml-sat" checked/> Satellite</label>
+      </div>
+      <button id="map-close-btn">↩ Globe</button>
+    </div>
+    <div id="map-leaflet"></div>
+    <div id="year-bar">
+      <span id="year-icon">🛰</span>
+      <span class="year-label">Year:</span>
+      <input type="range" id="year-slider" min="2014" max="2024" value="2024" step="1"/>
+      <span id="year-val">2024</span>
+      <span id="year-note">Loading imagery…</span>
+    </div>
+  </div>
+
   <!-- Loading screen -->
   <div id="loading-screen">
     <div id="loading-globe">
@@ -117,6 +138,8 @@
     <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
   </div>
 
+  <!-- Leaflet for street map panel -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Three.js: try multiple CDNs in order, then launch app -->
   <script>
     (function() {
