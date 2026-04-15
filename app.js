@@ -1,929 +1,363 @@
-/**
- * EarthView — 2025 High-Fidelity Globe
- * Three.js-based interactive 3D Earth renderer
- */
-
 'use strict';
 
-/* ─────────────────────────────────────────────────────────────
-   1. TEXTURE SOURCES
-   Primary: unpkg.com (npm CDN — highly reliable, no CORS issues)
-   Fallback: procedural canvas textures generated in-browser
-───────────────────────────────────────────────────────────── */
-const UNPKG = 'https://unpkg.com/three@0.165.0/examples/textures/planets/';
-const TEX = {
-  satellite:   UNPKG + 'earth_atmos_2048.jpg',
-  topoBump:    UNPKG + 'earth_normal_2048.jpg',
-  specular:    UNPKG + 'earth_specular_2048.jpg',
-  clouds:      UNPKG + 'earth_clouds_1024.png',
-  nightLights: UNPKG + 'earth_lights_2048.png',
-};
+// ── Scene ──
+const canvas = document.getElementById('earth-canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
 
-/* ── Procedural fallback textures (canvas-drawn, zero network) ── */
-function makeProceduralEarth() {
-  const c = document.createElement('canvas');
-  c.width = 1024; c.height = 512;
-  const ctx = c.getContext('2d');
-  // Ocean base
-  const ocean = ctx.createLinearGradient(0, 0, 0, 512);
-  ocean.addColorStop(0,   '#1a3d6e');
-  ocean.addColorStop(0.5, '#1e5799');
-  ocean.addColorStop(1,   '#1a3d6e');
-  ctx.fillStyle = ocean; ctx.fillRect(0, 0, 1024, 512);
-  // Simple continent shapes (rough approximations)
-  ctx.fillStyle = '#3a7a3a';
-  // Africa
-  ctx.beginPath(); ctx.ellipse(540, 290, 65, 100, 0.1, 0, Math.PI*2); ctx.fill();
-  // Europe
-  ctx.beginPath(); ctx.ellipse(510, 180, 40, 35, -0.3, 0, Math.PI*2); ctx.fill();
-  // Asia
-  ctx.beginPath(); ctx.ellipse(660, 210, 130, 80, 0.1, 0, Math.PI*2); ctx.fill();
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
+
+// ── Lights ──
+const sun = new THREE.DirectionalLight(0xfff8e7, 3.5);
+sun.position.set(5, 2, 5);
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0x112244, 0.5));
+
+// ── Stars ──
+(function() {
+  const n = 7000, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(2 * Math.random() - 1), r = 400 + Math.random() * 200;
+    pos[i*3] = r*Math.sin(ph)*Math.cos(th); pos[i*3+1] = r*Math.sin(ph)*Math.sin(th); pos[i*3+2] = r*Math.cos(ph);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.7, sizeAttenuation: true })));
+})();
+
+// ── Procedural textures (no network required) ──
+function makeEarthTex() {
+  const W = 2048, H = 1024, c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  // Ocean
+  const og = x.createLinearGradient(0,0,0,H);
+  og.addColorStop(0,'#1a4a7a'); og.addColorStop(0.5,'#1565c0'); og.addColorStop(1,'#1a4a7a');
+  x.fillStyle = og; x.fillRect(0,0,W,H);
+  // lat/lon → px
+  const p = (lat,lon) => [(lon+180)/360*W, (90-lat)/180*H];
+  function land(pts, color) {
+    x.fillStyle = color; x.beginPath();
+    x.moveTo(...p(pts[0][0],pts[0][1]));
+    pts.forEach(q => x.lineTo(...p(q[0],q[1])));
+    x.closePath(); x.fill();
+  }
   // North America
-  ctx.beginPath(); ctx.ellipse(200, 220, 90, 90, 0.2, 0, Math.PI*2); ctx.fill();
+  land([[70,-140],[72,-95],[60,-65],[47,-53],[40,-67],[35,-76],[25,-80],[20,-87],[15,-83],[8,-77],
+        [9,-79],[15,-92],[22,-105],[32,-117],[38,-123],[48,-124],[58,-137],[70,-140]],'#3d7a3d');
   // South America
-  ctx.beginPath(); ctx.ellipse(270, 360, 50, 80, 0.1, 0, Math.PI*2); ctx.fill();
+  land([[12,-72],[10,-62],[5,-52],[0,-50],[-5,-35],[-15,-39],[-25,-48],[-40,-62],[-55,-68],
+        [-45,-65],[-35,-57],[-25,-43],[-10,-37],[0,-50],[5,-52],[12,-72]],'#4a8a30');
+  // Europe
+  land([[71,28],[68,32],[60,30],[55,22],[50,14],[46,7],[43,5],[36,-6],[36,-9],[38,-9],
+        [44,-8],[48,-5],[51,2],[53,8],[57,10],[63,8],[65,14],[71,28]],'#5a8a3a');
+  // Africa
+  land([[37,-5],[37,37],[30,42],[20,44],[11,44],[2,42],[-5,40],[-10,40],[-20,35],
+        [-30,30],[-35,27],[-34,18],[-22,14],[-10,13],[0,10],[10,5],[20,15],[30,32],[37,-5]],'#6a8a25');
+  // Asia
+  land([[70,30],[72,80],[72,130],[68,170],[55,140],[40,130],[35,137],[22,114],[10,104],
+        [1,104],[5,100],[13,100],[22,90],[24,88],[20,85],[25,67],[22,60],[38,48],[38,36],
+        [42,44],[48,44],[50,55],[55,62],[60,60],[65,58],[68,45],[65,33],[70,30]],'#4a8040');
   // Australia
-  ctx.beginPath(); ctx.ellipse(760, 360, 55, 40, 0.1, 0, Math.PI*2); ctx.fill();
-  // Antarctica
-  ctx.fillStyle = '#e8f4ff';
-  ctx.beginPath(); ctx.ellipse(512, 495, 200, 25, 0, 0, Math.PI*2); ctx.fill();
-  // Arctic
-  ctx.beginPath(); ctx.ellipse(512, 15, 200, 20, 0, 0, Math.PI*2); ctx.fill();
-  const tex = new THREE.CanvasTexture(c);
-  return tex;
+  land([[-15,130],[-12,136],[-12,142],[-15,145],[-20,148],[-25,153],[-32,152],
+        [-38,140],[-32,128],[-26,114],[-17,122],[-15,130]],'#8a7030');
+  // Ice caps
+  x.fillStyle='#ddeeff'; x.fillRect(0,0,W,H*0.045); x.fillRect(0,H*0.945,W,H*0.055);
+  // Greenland
+  land([[83,-60],[83,-20],[76,-18],[72,-24],[76,-65],[83,-60]],'#cce8ff');
+  return new THREE.CanvasTexture(c);
 }
 
-function makeProceduralNight() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#000005'; ctx.fillRect(0, 0, 512, 256);
-  // Scattered city lights
-  const lights = [
-    [200,95],[195,90],[260,90],[290,95],[310,80],[450,100],[480,110],
-    [540,88],[600,110],[540,140],[200,150],[250,170],[195,100],
-  ];
-  lights.forEach(([x, y]) => {
-    for (let i = 0; i < 18; i++) {
-      const lx = x + (Math.random()-0.5)*30;
-      const ly = y + (Math.random()-0.5)*15;
-      ctx.fillStyle = `rgba(255,220,120,${0.3+Math.random()*0.5})`;
-      ctx.fillRect(lx, ly, 1.5, 1.5);
+function makeCloudTex() {
+  const W=1024,H=512,c=document.createElement('canvas');
+  c.width=W; c.height=H;
+  const x=c.getContext('2d'); x.clearRect(0,0,W,H);
+  for(let i=0;i<120;i++){
+    const cx=Math.random()*W, cy=H*0.5+Math.sin(cx/80)*20+(Math.random()-0.5)*H*0.6;
+    x.fillStyle=`rgba(255,255,255,${0.08+Math.random()*0.18})`;
+    x.beginPath(); x.ellipse(cx,cy,10+Math.random()*40,4+Math.random()*12,0,0,Math.PI*2); x.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+function makeNightTex() {
+  const W=1024,H=512,c=document.createElement('canvas');
+  c.width=W; c.height=H;
+  const x=c.getContext('2d'); x.fillStyle='#000005'; x.fillRect(0,0,W,H);
+  [[0.195,0.35],[0.165,0.36],[0.145,0.40],[0.105,0.36],[0.49,0.27],[0.515,0.23],
+   [0.54,0.25],[0.80,0.30],[0.77,0.33],[0.75,0.36],[0.70,0.42],[0.58,0.38],
+   [0.78,0.62],[0.27,0.52]].forEach(([cx,cy])=>{
+    for(let i=0;i<60;i++){
+      const a=Math.random()*Math.PI*2,r=Math.random()*25;
+      x.fillStyle=`rgba(255,210,100,${0.3+Math.random()*0.6})`;
+      x.fillRect(cx*W+Math.cos(a)*r, cy*H+Math.sin(a)*r*0.5, 1.5, 1.5);
     }
   });
   return new THREE.CanvasTexture(c);
 }
 
-function makeProceduralClouds() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = 'transparent'; ctx.clearRect(0, 0, 512, 256);
-  ctx.fillStyle = 'rgba(255,255,255,0.4)';
-  for (let i = 0; i < 40; i++) {
-    const x = Math.random() * 512;
-    const y = Math.random() * 256;
-    ctx.beginPath();
-    ctx.ellipse(x, y, 20 + Math.random()*40, 8 + Math.random()*14, Math.random(), 0, Math.PI*2);
-    ctx.fill();
-  }
-  return new THREE.CanvasTexture(c);
-}
+// ── Globe setup ──
+const R = 1;
+let earthMesh, cloudMesh, atmoMesh, nightMesh, gridMesh, cityGroup;
+const texStore = {};
+const state = { baseLayer:'satellite', clouds:true, atmo:true, terminator:true, grid:false, cities:false, rotate:true };
 
-/* ─────────────────────────────────────────────────────────────
-   2. SCENE SETUP
-───────────────────────────────────────────────────────────── */
-const canvas  = document.getElementById('earth-canvas');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.1;
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+function buildEarth() {
+  const sat = makeEarthTex(), cld = makeCloudTex(), ngt = makeNightTex();
+  texStore.sat = sat; texStore.ngt = ngt;
 
-const scene  = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
-camera.position.set(0, 0, 2.5);
-
-/* ─────────────────────────────────────────────────────────────
-   3. STAR FIELD
-───────────────────────────────────────────────────────────── */
-(function buildStars() {
-  const count = 8000;
-  const positions = new Float32Array(count * 3);
-  const sizes     = new Float32Array(count);
-  for (let i = 0; i < count; i++) {
-    const theta = Math.random() * Math.PI * 2;
-    const phi   = Math.acos(2 * Math.random() - 1);
-    const r     = 400 + Math.random() * 200;
-    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
-    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
-    positions[i*3+2] = r * Math.cos(phi);
-    sizes[i] = 0.5 + Math.random() * 1.5;
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geo.setAttribute('size',     new THREE.BufferAttribute(sizes,     1));
-  const mat = new THREE.PointsMaterial({
-    color: 0xffffff,
-    size: 0.8,
-    sizeAttenuation: true,
-    transparent: true,
-    opacity: 0.85,
-  });
-  scene.add(new THREE.Points(geo, mat));
-})();
-
-/* ─────────────────────────────────────────────────────────────
-   4. LIGHTING
-───────────────────────────────────────────────────────────── */
-const sunLight = new THREE.DirectionalLight(0xfff8e7, 3.5);
-sunLight.position.set(5, 2, 5);
-sunLight.castShadow = true;
-scene.add(sunLight);
-
-const ambientLight = new THREE.AmbientLight(0x112244, 0.4);
-scene.add(ambientLight);
-
-/* Subtle rim (back scatter) */
-const rimLight = new THREE.DirectionalLight(0x4499ff, 0.3);
-rimLight.position.set(-5, -2, -5);
-scene.add(rimLight);
-
-/* ─────────────────────────────────────────────────────────────
-   5. TEXTURE LOADER + PROGRESS
-───────────────────────────────────────────────────────────── */
-const loader    = new THREE.TextureLoader();
-const loadBar   = document.getElementById('loading-bar');
-let   loadCount = 0;
-const loadTotal = 5; // satellite, bump, spec, clouds, night
-
-function onTexLoaded() {
-  loadCount++;
-  loadBar.style.width = `${(loadCount / loadTotal) * 100}%`;
-}
-
-function loadTex(url, makeFallback) {
-  return new Promise(resolve => {
-    // 8-second per-texture timeout
-    const timer = setTimeout(() => {
-      console.warn('Texture timeout:', url, '— using procedural fallback');
-      onTexLoaded();
-      resolve(makeFallback ? makeFallback() : null);
-    }, 8000);
-
-    loader.load(
-      url,
-      tex => {
-        clearTimeout(timer);
-        onTexLoaded();
-        resolve(tex);
-      },
-      undefined,
-      err => {
-        clearTimeout(timer);
-        console.warn('Texture failed:', url, err);
-        onTexLoaded();
-        resolve(makeFallback ? makeFallback() : null);
-      }
-    );
-  });
-}
-
-/* ─────────────────────────────────────────────────────────────
-   6. EARTH GLOBE
-───────────────────────────────────────────────────────────── */
-const EARTH_RADIUS = 1;
-const earthGeo = new THREE.SphereGeometry(EARTH_RADIUS, 128, 64);
-
-let earthMesh, cloudMesh, atmosphereMesh, gridMesh, nightMesh;
-
-// State
-const state = {
-  baseLayer:   'satellite',   // satellite | topo | night
-  showClouds:  true,
-  showAtmo:    true,
-  showTerminator: true,
-  showGrid:    false,
-  showCities:  false,
-  autoRotate:  true,
-  targetLat:   0,
-  targetLon:   0,
-  cameraAlt:   2.5,           // camera.z equivalent in world units
-};
-
-async function buildEarth() {
-  const [satTex, bumpTex, specTex, cloudTex, nightTex] = await Promise.all([
-    loadTex(TEX.satellite,   makeProceduralEarth),
-    loadTex(TEX.topoBump,    null),
-    loadTex(TEX.specular,    null),
-    loadTex(TEX.clouds,      makeProceduralClouds),
-    loadTex(TEX.nightLights, makeProceduralNight),
-  ]);
-
-  // Store textures for layer switching
-  earthTextures.satellite = satTex;
-  earthTextures.night     = nightTex;
-  earthTextures.bump      = bumpTex;
-  earthTextures.specular  = specTex;
-
-  // ── Earth surface ──
-  const earthMat = new THREE.MeshPhongMaterial({
-    map:         satTex || makeProceduralEarth(),
-    bumpMap:     bumpTex   || undefined,
-    bumpScale:   0.012,
-    specularMap: specTex   || undefined,
-    specular:    new THREE.Color(0x2a4a6a),
-    shininess:   18,
-  });
-  earthMesh = new THREE.Mesh(earthGeo, earthMat);
-  earthMesh.receiveShadow = true;
+  earthMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(R, 96, 48),
+    new THREE.MeshPhongMaterial({ map: sat, specular: new THREE.Color(0x224466), shininess: 15 })
+  );
   scene.add(earthMesh);
 
-  // ── Night lights (rendered on top with additive blending) ──
-  const nightMat = new THREE.MeshBasicMaterial({
-    map:         nightTex,
-    blending:    THREE.AdditiveBlending,
-    transparent: true,
-    opacity:     0,           // controlled by terminator shader
-    depthWrite:  false,
-  });
-  nightMesh = new THREE.Mesh(new THREE.SphereGeometry(EARTH_RADIUS + 0.001, 128, 64), nightMat);
+  nightMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(R+0.001, 64, 32),
+    new THREE.MeshBasicMaterial({ map: ngt, blending: THREE.AdditiveBlending, transparent: true, opacity: 0.85, depthWrite: false })
+  );
   scene.add(nightMesh);
 
-  // ── Clouds ──
-  cloudTex.wrapS = cloudTex.wrapT = THREE.RepeatWrapping;
-  const cloudMat = new THREE.MeshPhongMaterial({
-    map:         cloudTex,
-    transparent: true,
-    opacity:     0.55,
-    depthWrite:  false,
-    blending:    THREE.NormalBlending,
-  });
   cloudMesh = new THREE.Mesh(
-    new THREE.SphereGeometry(EARTH_RADIUS + 0.004, 96, 48),
-    cloudMat
+    new THREE.SphereGeometry(R+0.004, 64, 32),
+    new THREE.MeshPhongMaterial({ map: cld, transparent: true, opacity: 0.5, depthWrite: false })
   );
   scene.add(cloudMesh);
 
-  // ── Atmosphere glow ──
-  atmosphereMesh = buildAtmosphere();
-  scene.add(atmosphereMesh);
+  atmoMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(R*1.035, 64, 32),
+    new THREE.ShaderMaterial({
+      uniforms: { sunDir: { value: sun.position.clone().normalize() } },
+      vertexShader: `varying vec3 vN,vV; void main(){ vN=normalize(normalMatrix*normal); vec4 w=modelMatrix*vec4(position,1.); vV=normalize(cameraPosition-w.xyz); gl_Position=projectionMatrix*viewMatrix*w; }`,
+      fragmentShader: `uniform vec3 sunDir; varying vec3 vN,vV; void main(){ float r=pow(1.-max(dot(vN,vV),0.),3.5); float s=max(dot(normalize(sunDir),vN),0.); float i=r*(0.4+0.6*s)*0.7; gl_FragColor=vec4(vec3(0.23,0.6,0.85)*i,i*0.85); }`,
+      side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false
+    })
+  );
+  scene.add(atmoMesh);
 
-  // ── Lat/Lon grid ──
   gridMesh = buildGrid();
   gridMesh.visible = false;
   scene.add(gridMesh);
 
-  // ── City markers ──
-  buildCityMarkers();
-
-  hideLoading();
-  startRenderLoop();
-}
-
-const earthTextures = {};
-
-/* ─────────────────────────────────────────────────────────────
-   7. ATMOSPHERE (custom shader glow)
-───────────────────────────────────────────────────────────── */
-function buildAtmosphere() {
-  const atmoGeo = new THREE.SphereGeometry(EARTH_RADIUS * 1.035, 64, 32);
-  const atmoMat = new THREE.ShaderMaterial({
-    uniforms: {
-      sunDir: { value: sunLight.position.clone().normalize() },
-      glowColor: { value: new THREE.Color(0x3a9ad9) },
-      coeff: { value: 0.7 },
-    },
-    vertexShader: `
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-      void main(){
-        vNormal = normalize(normalMatrix * normal);
-        vec4 worldPos = modelMatrix * vec4(position, 1.0);
-        vViewDir = normalize(cameraPosition - worldPos.xyz);
-        gl_Position = projectionMatrix * viewMatrix * worldPos;
-      }
-    `,
-    fragmentShader: `
-      uniform vec3 sunDir;
-      uniform vec3 glowColor;
-      uniform float coeff;
-      varying vec3 vNormal;
-      varying vec3 vViewDir;
-      void main(){
-        float rim = 1.0 - max(dot(vNormal, vViewDir), 0.0);
-        rim = pow(rim, 3.5);
-        float sun = max(dot(normalize(sunDir), vNormal), 0.0);
-        float intensity = rim * (0.35 + 0.65 * sun) * coeff;
-        gl_FragColor = vec4(glowColor * intensity, intensity * 0.85);
-      }
-    `,
-    side:        THREE.BackSide,
-    blending:    THREE.AdditiveBlending,
-    transparent: true,
-    depthWrite:  false,
-  });
-  return new THREE.Mesh(atmoGeo, atmoMat);
-}
-
-/* ─────────────────────────────────────────────────────────────
-   8. LAT/LON GRID
-───────────────────────────────────────────────────────────── */
-function buildGrid() {
-  const group = new THREE.Group();
-  const mat   = new THREE.LineBasicMaterial({ color: 0x4fc3f7, opacity: 0.18, transparent: true });
-
-  // Latitude lines every 15°
-  for (let lat = -90; lat <= 90; lat += 15) {
-    const pts = [];
-    const phi = THREE.MathUtils.degToRad(90 - lat);
-    for (let lon = 0; lon <= 360; lon += 2) {
-      const theta = THREE.MathUtils.degToRad(lon);
-      const r = EARTH_RADIUS + 0.005;
-      pts.push(new THREE.Vector3(
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.cos(phi),
-        r * Math.sin(phi) * Math.sin(theta)
-      ));
-    }
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
-  }
-
-  // Longitude lines every 15°
-  for (let lon = 0; lon < 360; lon += 15) {
-    const pts = [];
-    const theta = THREE.MathUtils.degToRad(lon);
-    for (let lat = -90; lat <= 90; lat += 2) {
-      const phi = THREE.MathUtils.degToRad(90 - lat);
-      const r = EARTH_RADIUS + 0.005;
-      pts.push(new THREE.Vector3(
-        r * Math.sin(phi) * Math.cos(theta),
-        r * Math.cos(phi),
-        r * Math.sin(phi) * Math.sin(theta)
-      ));
-    }
-    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
-  }
-
-  return group;
-}
-
-/* ─────────────────────────────────────────────────────────────
-   9. CITY MARKERS
-───────────────────────────────────────────────────────────── */
-const CITIES = [
-  { name: 'New York',      lat:  40.71, lon:  -74.01 },
-  { name: 'London',        lat:  51.51, lon:   -0.13 },
-  { name: 'Tokyo',         lat:  35.68, lon:  139.69 },
-  { name: 'Sydney',        lat: -33.87, lon:  151.21 },
-  { name: 'Paris',         lat:  48.85, lon:    2.35 },
-  { name: 'Beijing',       lat:  39.90, lon:  116.41 },
-  { name: 'Mumbai',        lat:  19.08, lon:   72.88 },
-  { name: 'São Paulo',     lat: -23.55, lon:  -46.63 },
-  { name: 'Cairo',         lat:  30.04, lon:   31.24 },
-  { name: 'Lagos',         lat:   6.52, lon:    3.38 },
-  { name: 'Moscow',        lat:  55.75, lon:   37.62 },
-  { name: 'Los Angeles',   lat:  34.05, lon: -118.24 },
-  { name: 'Dubai',         lat:  25.20, lon:   55.27 },
-  { name: 'Singapore',     lat:   1.35, lon:  103.82 },
-  { name: 'Mexico City',   lat:  19.43, lon:  -99.13 },
-  { name: 'Johannesburg',  lat: -26.20, lon:   28.04 },
-  { name: 'Toronto',       lat:  43.65, lon:  -79.38 },
-  { name: 'Berlin',        lat:  52.52, lon:   13.40 },
-  { name: 'Istanbul',      lat:  41.01, lon:   28.95 },
-  { name: 'Seoul',         lat:  37.57, lon:  126.98 },
-];
-
-let cityGroup;
-
-function buildCityMarkers() {
-  cityGroup = new THREE.Group();
-  const dotGeo = new THREE.SphereGeometry(0.008, 8, 8);
-  const dotMat = new THREE.MeshBasicMaterial({ color: 0xffeb3b });
-
-  CITIES.forEach(city => {
-    const v = latLonToVec3(city.lat, city.lon, EARTH_RADIUS + 0.008);
-    const dot = new THREE.Mesh(dotGeo, dotMat);
-    dot.position.copy(v);
-    dot.userData = city;
-    cityGroup.add(dot);
-  });
-
+  cityGroup = buildCities();
   cityGroup.visible = false;
   scene.add(cityGroup);
+
+  hideLoading();
+  startRender();
+  upgradeTextures();
 }
 
-/* ─────────────────────────────────────────────────────────────
-   10. COORDINATE HELPERS
-───────────────────────────────────────────────────────────── */
-function latLonToVec3(lat, lon, r) {
-  const phi   = THREE.MathUtils.degToRad(90 - lat);
-  const theta = THREE.MathUtils.degToRad(lon + 180);
-  return new THREE.Vector3(
-    -r * Math.sin(phi) * Math.cos(theta),
-     r * Math.cos(phi),
-     r * Math.sin(phi) * Math.sin(theta)
-  );
-}
-
-function vec3ToLatLon(v) {
-  const r   = v.length();
-  const lat = 90 - THREE.MathUtils.radToDeg(Math.acos(v.y / r));
-  let   lon = THREE.MathUtils.radToDeg(Math.atan2(v.z, -v.x)) - 180;
-  if (lon < -180) lon += 360;
-  return { lat, lon };
-}
-
-/* ─────────────────────────────────────────────────────────────
-   11. INTERACTION — orbit controls (custom, no import needed)
-───────────────────────────────────────────────────────────── */
-const mouse    = { x: 0, y: 0, down: false, moved: false };
-const drag     = { startX: 0, startY: 0, rotX: 0, rotY: 0 };
-let   targetRotX = 0, targetRotY = 0;
-let   currentRotX = 0, currentRotY = 0;
-
-// Camera distance (zoom)
-let targetDist  = 2.5;
-let currentDist = 2.5;
-const MIN_DIST  = 1.15;
-const MAX_DIST  = 10;
-
-canvas.addEventListener('mousedown', e => {
-  mouse.down  = true;
-  mouse.moved = false;
-  drag.startX = e.clientX;
-  drag.startY = e.clientY;
-  drag.rotX   = targetRotX;
-  drag.rotY   = targetRotY;
-});
-
-canvas.addEventListener('mousemove', e => {
-  if (!mouse.down) {
-    // Update coordinate display on hover
-    updateHoverCoords(e.clientX, e.clientY);
-    return;
+function buildGrid() {
+  const g = new THREE.Group(), m = new THREE.LineBasicMaterial({ color: 0x4fc3f7, transparent: true, opacity: 0.2 });
+  for (let lat=-90; lat<=90; lat+=15) {
+    const pts=[], phi=THREE.MathUtils.degToRad(90-lat);
+    for (let lon=0; lon<=360; lon+=3) { const th=THREE.MathUtils.degToRad(lon); pts.push(new THREE.Vector3((R+0.005)*Math.sin(phi)*Math.cos(th),(R+0.005)*Math.cos(phi),(R+0.005)*Math.sin(phi)*Math.sin(th))); }
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), m));
   }
-  mouse.moved = true;
-  const dx = e.clientX - drag.startX;
-  const dy = e.clientY - drag.startY;
-  const sensitivity = 0.005 * (currentDist / 2.5);
-  targetRotY = drag.rotY + dx * sensitivity;
-  targetRotX = drag.rotX + dy * sensitivity;
-  targetRotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotX));
-});
-
-canvas.addEventListener('mouseup', e => {
-  if (!mouse.moved) handleClick(e.clientX, e.clientY);
-  mouse.down = false;
-});
-
-canvas.addEventListener('mouseleave', () => { mouse.down = false; });
-
-// Touch
-let lastTouchDist = 0;
-canvas.addEventListener('touchstart', e => {
-  if (e.touches.length === 1) {
-    mouse.down = true;
-    mouse.moved = false;
-    drag.startX = e.touches[0].clientX;
-    drag.startY = e.touches[0].clientY;
-    drag.rotX   = targetRotX;
-    drag.rotY   = targetRotY;
-  } else if (e.touches.length === 2) {
-    lastTouchDist = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
+  for (let lon=0; lon<360; lon+=15) {
+    const pts=[], th=THREE.MathUtils.degToRad(lon);
+    for (let lat=-90; lat<=90; lat+=3) { const phi=THREE.MathUtils.degToRad(90-lat); pts.push(new THREE.Vector3((R+0.005)*Math.sin(phi)*Math.cos(th),(R+0.005)*Math.cos(phi),(R+0.005)*Math.sin(phi)*Math.sin(th))); }
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), m));
   }
-  e.preventDefault();
-}, { passive: false });
-
-canvas.addEventListener('touchmove', e => {
-  if (e.touches.length === 1 && mouse.down) {
-    mouse.moved = true;
-    const dx = e.touches[0].clientX - drag.startX;
-    const dy = e.touches[0].clientY - drag.startY;
-    const sensitivity = 0.005 * (currentDist / 2.5);
-    targetRotY = drag.rotY + dx * sensitivity;
-    targetRotX = drag.rotX + dy * sensitivity;
-    targetRotX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotX));
-  } else if (e.touches.length === 2) {
-    const d = Math.hypot(
-      e.touches[0].clientX - e.touches[1].clientX,
-      e.touches[0].clientY - e.touches[1].clientY
-    );
-    const scale = lastTouchDist / d;
-    targetDist = Math.max(MIN_DIST, Math.min(MAX_DIST, targetDist * scale));
-    lastTouchDist = d;
-  }
-  e.preventDefault();
-}, { passive: false });
-
-canvas.addEventListener('touchend', () => { mouse.down = false; });
-
-// Scroll zoom
-canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  const delta = e.deltaY > 0 ? 1.1 : 0.91;
-  targetDist  = Math.max(MIN_DIST, Math.min(MAX_DIST, targetDist * delta));
-  updateZoomSlider();
-}, { passive: false });
-
-function updateZoomSlider() {
-  const slider = document.getElementById('zoom-slider');
-  if (slider) slider.value = targetDist;
+  return g;
 }
 
-/* Raycasting for click/hover */
-const raycaster = new THREE.Raycaster();
-const mouseVec  = new THREE.Vector2();
-
-function toNDC(cx, cy) {
-  mouseVec.x =  (cx / window.innerWidth)  * 2 - 1;
-  mouseVec.y = -(cy / window.innerHeight) * 2 + 1;
-}
-
-function updateHoverCoords(cx, cy) {
-  toNDC(cx, cy);
-  raycaster.setFromCamera(mouseVec, camera);
-  const hits = raycaster.intersectObject(earthMesh);
-  if (hits.length > 0) {
-    const { lat, lon } = vec3ToLatLon(hits[0].point);
-    const dist = currentDist - 1;
-    document.getElementById('lat-display').textContent = `Lat: ${lat.toFixed(4)}°`;
-    document.getElementById('lon-display').textContent = `Lon: ${lon.toFixed(4)}°`;
-    document.getElementById('alt-display').textContent = `Alt: ${(dist * 6371).toFixed(0)} km`;
-  }
-}
-
-function handleClick(cx, cy) {
-  toNDC(cx, cy);
-  raycaster.setFromCamera(mouseVec, camera);
-
-  // City hit test
-  if (state.showCities && cityGroup) {
-    const hits = raycaster.intersectObjects(cityGroup.children);
-    if (hits.length > 0) {
-      showCityTooltip(hits[0].object.userData, cx, cy);
-      return;
-    }
-  }
-
-  // Globe click — show coords
-  const hits = raycaster.intersectObject(earthMesh);
-  if (hits.length > 0) {
-    const { lat, lon } = vec3ToLatLon(hits[0].point);
-    showPinTooltip(`${lat.toFixed(4)}° N, ${lon.toFixed(4)}° E`, lat, lon, cx, cy);
-  }
-}
-
-function showCityTooltip(city, cx, cy) {
-  showPinTooltip(city.name, city.lat, city.lon, cx, cy);
-}
-
-function showPinTooltip(name, lat, lon, cx, cy) {
-  const tt = document.getElementById('pin-tooltip');
-  document.getElementById('pin-name').textContent   = name;
-  document.getElementById('pin-coords').textContent = `${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
-  tt.style.left = `${Math.min(cx + 12, window.innerWidth  - 190)}px`;
-  tt.style.top  = `${Math.min(cy - 10, window.innerHeight - 80)}px`;
-  tt.classList.remove('hidden');
-}
-
-document.getElementById('pin-close').addEventListener('click', () => {
-  document.getElementById('pin-tooltip').classList.add('hidden');
-});
-
-/* ─────────────────────────────────────────────────────────────
-   12. FLY TO LOCATION
-───────────────────────────────────────────────────────────── */
-function flyTo(lat, lon, dist) {
-  // Convert desired lat/lon to rotation angles
-  const targetPhi   = THREE.MathUtils.degToRad(lon);          // around Y
-  const targetTheta = THREE.MathUtils.degToRad(-lat);         // tilt
-  targetRotY = -targetPhi;
-  targetRotX = targetTheta;
-  if (dist !== undefined) targetDist = dist;
-  updateZoomSlider();
-}
-
-/* ─────────────────────────────────────────────────────────────
-   13. SUN POSITION (real time)
-───────────────────────────────────────────────────────────── */
-function computeSunPosition() {
-  const now  = new Date();
-  const doy  = getDayOfYear(now);
-  const hour = now.getUTCHours() + now.getUTCMinutes() / 60;
-  // Declination angle
-  const decl  = 23.45 * Math.sin(THREE.MathUtils.degToRad((360 / 365) * (doy - 81)));
-  // Hour angle
-  const ha    = (hour - 12) * 15;
-  // Sun unit vector
-  const phi   = THREE.MathUtils.degToRad(90 - decl);
-  const theta = THREE.MathUtils.degToRad(-ha);
-  sunLight.position.set(
-    Math.sin(phi) * Math.cos(theta) * 100,
-    Math.cos(phi)                   * 100,
-    Math.sin(phi) * Math.sin(theta) * 100
-  );
-  // Update atmosphere shader
-  if (atmosphereMesh) {
-    atmosphereMesh.material.uniforms.sunDir.value.copy(
-      sunLight.position.clone().normalize()
-    );
-  }
-}
-
-function getDayOfYear(d) {
-  const start = new Date(d.getFullYear(), 0, 0);
-  return Math.floor((d - start) / 86400000);
-}
-
-/* Night lights opacity based on sun dot product */
-function updateNightLights() {
-  if (!nightMesh || !earthMesh) return;
-  if (!state.showTerminator) { nightMesh.material.opacity = 0; return; }
-  // No per-fragment blending here — handled by global render pass;
-  // just keep opacity at 1 and let the additive blending work
-  nightMesh.material.opacity = 0.9;
-}
-
-/* ─────────────────────────────────────────────────────────────
-   14. RENDER LOOP
-───────────────────────────────────────────────────────────── */
-const clock = new THREE.Clock();
-let autoRotSpeed = 0.04; // degrees per second
-
-function startRenderLoop() {
-  renderer.setAnimationLoop(render);
-}
-
-function render() {
-  const delta = clock.getDelta();
-
-  // Auto-rotate
-  if (state.autoRotate && !mouse.down) {
-    targetRotY += THREE.MathUtils.degToRad(autoRotSpeed * delta * 60);
-  }
-
-  // Smooth camera
-  currentRotX += (targetRotX - currentRotX) * 0.08;
-  currentRotY += (targetRotY - currentRotY) * 0.08;
-  currentDist += (targetDist - currentDist) * 0.08;
-
-  camera.position.x = currentDist * Math.sin(currentRotX) * Math.sin(currentRotY);
-  camera.position.y = currentDist * Math.sin(currentRotX);
-  camera.position.z = currentDist * Math.cos(currentRotX) * Math.cos(currentRotY);
-
-  // Recalculate properly
-  camera.position.set(
-    currentDist * Math.cos(currentRotX) * Math.sin(currentRotY),
-    currentDist * Math.sin(currentRotX),
-    currentDist * Math.cos(currentRotX) * Math.cos(currentRotY)
-  );
-  camera.lookAt(0, 0, 0);
-
-  // Cloud drift
-  if (cloudMesh) cloudMesh.rotation.y += 0.00008;
-
-  // Sun update (every 60 frames)
-  if (Math.round(clock.elapsedTime * 60) % 60 === 0) {
-    computeSunPosition();
-    updateNightLights();
-  }
-
-  // Compass
-  updateCompass();
-
-  renderer.render(scene, camera);
-}
-
-function updateCompass() {
-  const svg = document.getElementById('compass-svg');
-  if (svg) {
-    svg.style.transform = `rotate(${-currentRotY * (180 / Math.PI)}deg)`;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────
-   15. LAYER SWITCHING
-───────────────────────────────────────────────────────────── */
-function applyLayers() {
-  if (!earthMesh) return;
-  const mat = earthMesh.material;
-  if (state.baseLayer === 'satellite' || state.baseLayer === 'topo') {
-    mat.map = earthTextures.satellite;
-    mat.bumpMap   = earthTextures.bump;
-    mat.bumpScale = state.baseLayer === 'topo' ? 0.035 : 0.012;
-    mat.needsUpdate = true;
-    if (nightMesh) nightMesh.visible = state.showTerminator;
-  } else if (state.baseLayer === 'night') {
-    mat.map = earthTextures.night;
-    mat.bumpMap = null;
-    mat.needsUpdate = true;
-    if (nightMesh) nightMesh.visible = false;
-  }
-  if (cloudMesh)      cloudMesh.visible      = state.showClouds;
-  if (atmosphereMesh) atmosphereMesh.visible = state.showAtmo;
-  if (gridMesh)       gridMesh.visible       = state.showGrid;
-  if (cityGroup)      cityGroup.visible      = state.showCities;
-}
-
-/* ─────────────────────────────────────────────────────────────
-   16. LOADING SCREEN
-───────────────────────────────────────────────────────────── */
-function hideLoading() {
-  const ls = document.getElementById('loading-screen');
-  ls.classList.add('fade-out');
-  setTimeout(() => ls.classList.add('hidden'), 700);
-}
-
-/* ─────────────────────────────────────────────────────────────
-   17. UI WIRING
-───────────────────────────────────────────────────────────── */
-
-/* Layer panel toggle */
-document.getElementById('btn-layers').addEventListener('click', () => {
-  const panel = document.getElementById('layer-panel');
-  const btn   = document.getElementById('btn-layers');
-  panel.classList.toggle('hidden');
-  btn.classList.toggle('active');
-});
-
-document.querySelectorAll('input[name="base"]').forEach(r => {
-  r.addEventListener('change', () => {
-    state.baseLayer = r.value;
-    applyLayers();
-  });
-});
-
-[
-  ['tog-clouds',      'showClouds'],
-  ['tog-atmosphere',  'showAtmo'],
-  ['tog-terminator',  'showTerminator'],
-  ['tog-grid',        'showGrid'],
-  ['tog-cities',      'showCities'],
-  ['tog-rotate',      'autoRotate'],
-].forEach(([id, key]) => {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener('change', () => { state[key] = el.checked; applyLayers(); });
-});
-
-/* Zoom buttons */
-document.getElementById('zoom-in').addEventListener('click', () => {
-  targetDist = Math.max(MIN_DIST, targetDist * 0.8);
-  updateZoomSlider();
-});
-document.getElementById('zoom-out').addEventListener('click', () => {
-  targetDist = Math.min(MAX_DIST, targetDist * 1.25);
-  updateZoomSlider();
-});
-document.getElementById('zoom-slider').addEventListener('input', e => {
-  targetDist = parseFloat(e.target.value);
-});
-
-/* Compass: reset north */
-document.getElementById('compass').addEventListener('click', () => {
-  targetRotY = 0;
-  targetRotX = 0;
-});
-
-/* Reset button */
-document.getElementById('btn-home').addEventListener('click', () => {
-  targetRotX  = 0;
-  targetRotY  = 0;
-  targetDist  = 2.5;
-  updateZoomSlider();
-});
-
-/* ─────────────────────────────────────────────────────────────
-   18. SEARCH
-───────────────────────────────────────────────────────────── */
-const SEARCH_DB = [
-  ...CITIES,
-  // Landmarks & regions
-  { name: 'Amazon Rainforest',  lat:  -3.46, lon:  -62.22 },
-  { name: 'Sahara Desert',      lat:  23.42, lon:   25.66 },
-  { name: 'Himalayas',          lat:  27.99, lon:   86.93 },
-  { name: 'Antarctic Ice',      lat: -75.25, lon:    0.07 },
-  { name: 'Arctic Ocean',       lat:  85.00, lon:    0.00 },
-  { name: 'Grand Canyon',       lat:  36.10, lon: -112.11 },
-  { name: 'Great Barrier Reef', lat: -18.29, lon:  147.70 },
-  { name: 'Mariana Trench',     lat:  11.37, lon:  142.59 },
-  { name: 'Nile River',         lat:  25.00, lon:   32.00 },
-  { name: 'Mississippi River',  lat:  32.00, lon:  -90.00 },
-  { name: 'Mount Everest',      lat:  27.99, lon:   86.93 },
-  { name: 'Kilimanjaro',        lat:  -3.07, lon:   37.35 },
-  { name: 'Andes Mountains',    lat: -16.00, lon:  -71.00 },
-  { name: 'Greenland',          lat:  72.00, lon:  -40.00 },
-  { name: 'Iceland',            lat:  64.96, lon:  -19.02 },
-  { name: 'Madagascar',         lat: -18.77, lon:   46.87 },
-  { name: 'Borneo',             lat:   1.00, lon:  114.00 },
-  { name: 'New Zealand',        lat: -40.90, lon:  174.89 },
-  { name: 'Hawaii',             lat:  21.31, lon: -157.80 },
-  { name: 'Galapagos Islands',  lat:  -0.83, lon:  -91.03 },
+// ── Cities ──
+const CITIES = [
+  {name:'New York',lat:40.71,lon:-74.01},{name:'London',lat:51.51,lon:-0.13},
+  {name:'Tokyo',lat:35.68,lon:139.69},{name:'Sydney',lat:-33.87,lon:151.21},
+  {name:'Paris',lat:48.85,lon:2.35},{name:'Beijing',lat:39.90,lon:116.41},
+  {name:'Mumbai',lat:19.08,lon:72.88},{name:'São Paulo',lat:-23.55,lon:-46.63},
+  {name:'Cairo',lat:30.04,lon:31.24},{name:'Lagos',lat:6.52,lon:3.38},
+  {name:'Moscow',lat:55.75,lon:37.62},{name:'Los Angeles',lat:34.05,lon:-118.24},
+  {name:'Dubai',lat:25.20,lon:55.27},{name:'Singapore',lat:1.35,lon:103.82},
+  {name:'Berlin',lat:52.52,lon:13.40},{name:'Seoul',lat:37.57,lon:126.98},
 ];
 
-const searchInput   = document.getElementById('search-input');
-const searchResults = document.getElementById('search-results');
+function ll2v(lat,lon,r){ const phi=THREE.MathUtils.degToRad(90-lat),th=THREE.MathUtils.degToRad(lon+180); return new THREE.Vector3(-r*Math.sin(phi)*Math.cos(th),r*Math.cos(phi),r*Math.sin(phi)*Math.sin(th)); }
+function v2ll(v){ const r=v.length(); return { lat:90-THREE.MathUtils.radToDeg(Math.acos(v.y/r)), lon:THREE.MathUtils.radToDeg(Math.atan2(v.z,-v.x))-180 }; }
 
-searchInput.addEventListener('input', () => {
-  const q = searchInput.value.trim().toLowerCase();
-  if (q.length < 2) { searchResults.classList.remove('visible'); return; }
-
-  // Check if it looks like coordinates: "lat, lon"
-  const coordMatch = q.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
-  if (coordMatch) {
-    const lat = parseFloat(coordMatch[1]);
-    const lon = parseFloat(coordMatch[2]);
-    showSearchResult([{ name: `${lat}°, ${lon}°`, sub: 'Coordinate', lat, lon }]);
-    return;
-  }
-
-  const results = SEARCH_DB.filter(p => p.name.toLowerCase().includes(q)).slice(0, 8);
-  showSearchResult(results);
-});
-
-function showSearchResult(results) {
-  if (!results.length) { searchResults.classList.remove('visible'); return; }
-  searchResults.innerHTML = results.map(r => `
-    <div class="search-item" data-lat="${r.lat}" data-lon="${r.lon}">
-      <div class="search-item-name">${r.name}</div>
-      <div class="search-item-sub">${r.sub || `${r.lat.toFixed(2)}°, ${r.lon.toFixed(2)}°`}</div>
-    </div>
-  `).join('');
-  searchResults.classList.add('visible');
-  searchResults.querySelectorAll('.search-item').forEach(el => {
-    el.addEventListener('click', () => {
-      flyTo(parseFloat(el.dataset.lat), parseFloat(el.dataset.lon), 1.6);
-      searchInput.value = el.querySelector('.search-item-name').textContent;
-      searchResults.classList.remove('visible');
-    });
-  });
+function buildCities() {
+  const g=new THREE.Group(), dg=new THREE.SphereGeometry(0.008,8,8), dm=new THREE.MeshBasicMaterial({color:0xffeb3b});
+  CITIES.forEach(c=>{ const m=new THREE.Mesh(dg,dm); m.position.copy(ll2v(c.lat,c.lon,R+0.01)); m.userData=c; g.add(m); });
+  return g;
 }
 
-document.getElementById('search-btn').addEventListener('click', () => {
-  searchInput.dispatchEvent(new Event('input'));
-});
-
-searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') searchInput.dispatchEvent(new Event('input'));
-  if (e.key === 'Escape') searchResults.classList.remove('visible');
-});
-
-document.addEventListener('click', e => {
-  if (!e.target.closest('#search-wrapper')) searchResults.classList.remove('visible');
-});
-
-/* ─────────────────────────────────────────────────────────────
-   19. TIME DISPLAY
-───────────────────────────────────────────────────────────── */
-function updateTimeDisplay() {
-  const now = new Date();
-  const utc = now.toUTCString().replace('GMT', 'UTC');
-  document.getElementById('time-display').textContent = utc;
+// ── Background texture upgrade ──
+function upgradeTextures() {
+  const BASE = 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@r128/examples/textures/planets/';
+  const tl = new THREE.TextureLoader();
+  tl.load(BASE+'earth_atmos_2048.jpg', t => { earthMesh.material.map = t; earthMesh.material.needsUpdate = true; texStore.sat = t; });
+  tl.load(BASE+'earth_normal_2048.jpg', t => { earthMesh.material.bumpMap = t; earthMesh.material.bumpScale = 0.012; earthMesh.material.needsUpdate = true; });
+  tl.load(BASE+'earth_specular_2048.jpg', t => { earthMesh.material.specularMap = t; earthMesh.material.needsUpdate = true; });
+  tl.load(BASE+'earth_clouds_1024.png', t => { cloudMesh.material.map = t; cloudMesh.material.needsUpdate = true; });
+  tl.load(BASE+'earth_lights_2048.png', t => { nightMesh.material.map = t; nightMesh.material.needsUpdate = true; texStore.ngt = t; });
 }
-setInterval(updateTimeDisplay, 1000);
-updateTimeDisplay();
 
-/* ─────────────────────────────────────────────────────────────
-   20. RESIZE
-───────────────────────────────────────────────────────────── */
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+// ── Camera / interaction ──
+let rotX=0,rotY=0,tRotX=0,tRotY=0,dist=2.5,tDist=2.5;
+const MIN_D=1.15, MAX_D=10;
+const mouse={down:false,moved:false,sx:0,sy:0,rx:0,ry:0};
+
+canvas.addEventListener('mousedown',e=>{mouse.down=true;mouse.moved=false;mouse.sx=e.clientX;mouse.sy=e.clientY;mouse.rx=tRotX;mouse.ry=tRotY;});
+canvas.addEventListener('mousemove',e=>{
+  if(!mouse.down){hover(e.clientX,e.clientY);return;}
+  mouse.moved=true;
+  const s=0.005*(dist/2.5);
+  tRotY=mouse.ry+(e.clientX-mouse.sx)*s;
+  tRotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,mouse.rx+(e.clientY-mouse.sy)*s));
+});
+canvas.addEventListener('mouseup',e=>{if(!mouse.moved)click(e.clientX,e.clientY);mouse.down=false;});
+canvas.addEventListener('mouseleave',()=>{mouse.down=false;});
+canvas.addEventListener('wheel',e=>{e.preventDefault();tDist=Math.max(MIN_D,Math.min(MAX_D,tDist*(e.deltaY>0?1.1:0.91)));syncSlider();},{passive:false});
+
+// Touch
+let ltd=0;
+canvas.addEventListener('touchstart',e=>{if(e.touches.length===1){mouse.down=true;mouse.moved=false;mouse.sx=e.touches[0].clientX;mouse.sy=e.touches[0].clientY;mouse.rx=tRotX;mouse.ry=tRotY;}else if(e.touches.length===2){ltd=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}e.preventDefault();},{passive:false});
+canvas.addEventListener('touchmove',e=>{if(e.touches.length===1&&mouse.down){mouse.moved=true;const s=0.005*(dist/2.5);tRotY=mouse.ry+(e.touches[0].clientX-mouse.sx)*s;tRotX=Math.max(-Math.PI/2,Math.min(Math.PI/2,mouse.rx+(e.touches[0].clientY-mouse.sy)*s));}else if(e.touches.length===2){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);tDist=Math.max(MIN_D,Math.min(MAX_D,tDist*(ltd/d)));ltd=d;syncSlider();}e.preventDefault();},{passive:false});
+canvas.addEventListener('touchend',()=>{mouse.down=false;});
+
+const ray=new THREE.Raycaster(), mv=new THREE.Vector2();
+function toNDC(cx,cy){mv.x=(cx/window.innerWidth)*2-1;mv.y=-(cy/window.innerHeight)*2+1;}
+
+function hover(cx,cy){
+  if(!earthMesh)return;
+  toNDC(cx,cy);ray.setFromCamera(mv,camera);
+  const h=ray.intersectObject(earthMesh);
+  if(h.length){const {lat,lon}=v2ll(h[0].point);document.getElementById('lat-display').textContent=`Lat: ${lat.toFixed(4)}°`;document.getElementById('lon-display').textContent=`Lon: ${lon.toFixed(4)}°`;document.getElementById('alt-display').textContent=`Alt: ${((dist-1)*6371).toFixed(0)} km`;}
+}
+
+function click(cx,cy){
+  if(!earthMesh)return;
+  toNDC(cx,cy);ray.setFromCamera(mv,camera);
+  if(state.cities&&cityGroup){const h=ray.intersectObjects(cityGroup.children);if(h.length){showPin(h[0].object.userData.name,h[0].object.userData.lat,h[0].object.userData.lon,cx,cy);return;}}
+  const h=ray.intersectObject(earthMesh);
+  if(h.length){const {lat,lon}=v2ll(h[0].point);showPin(`${lat.toFixed(3)}°, ${lon.toFixed(3)}°`,lat,lon,cx,cy);}
+}
+
+function showPin(name,lat,lon,cx,cy){
+  const tt=document.getElementById('pin-tooltip');
+  document.getElementById('pin-name').textContent=name;
+  document.getElementById('pin-coords').textContent=`${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+  tt.style.left=`${Math.min(cx+12,window.innerWidth-190)}px`;
+  tt.style.top=`${Math.min(cy-10,window.innerHeight-80)}px`;
+  tt.classList.remove('hidden');
+}
+document.getElementById('pin-close').addEventListener('click',()=>document.getElementById('pin-tooltip').classList.add('hidden'));
+
+function flyTo(lat,lon,d){tRotY=-THREE.MathUtils.degToRad(lon);tRotX=THREE.MathUtils.degToRad(-lat);if(d)tDist=d;syncSlider();}
+function syncSlider(){const s=document.getElementById('zoom-slider');if(s)s.value=tDist;}
+
+// ── Render loop ──
+const clock = new THREE.Clock();
+function startRender(){ renderer.setAnimationLoop(render); }
+function render(){
+  const dt=clock.getDelta();
+  if(state.rotate&&!mouse.down) tRotY+=THREE.MathUtils.degToRad(0.04*dt*60);
+  rotX+=(tRotX-rotX)*0.08; rotY+=(tRotY-rotY)*0.08; dist+=(tDist-dist)*0.08;
+  camera.position.set(dist*Math.cos(rotX)*Math.sin(rotY),dist*Math.sin(rotX),dist*Math.cos(rotX)*Math.cos(rotY));
+  camera.lookAt(0,0,0);
+  if(cloudMesh) cloudMesh.rotation.y+=0.00008;
+  const svg=document.getElementById('compass-svg');
+  if(svg) svg.style.transform=`rotate(${-rotY*(180/Math.PI)}deg)`;
+  renderer.render(scene,camera);
+}
+
+// ── Sun position ──
+function setSunPos(){
+  const now=new Date(),doy=Math.floor((now-(new Date(now.getFullYear(),0,0)))/86400000);
+  const decl=23.45*Math.sin(THREE.MathUtils.degToRad((360/365)*(doy-81)));
+  const ha=(now.getUTCHours()+now.getUTCMinutes()/60-12)*15;
+  const phi=THREE.MathUtils.degToRad(90-decl),th=THREE.MathUtils.degToRad(-ha);
+  sun.position.set(Math.sin(phi)*Math.cos(th)*100,Math.cos(phi)*100,Math.sin(phi)*Math.sin(th)*100);
+  if(atmoMesh) atmoMesh.material.uniforms.sunDir.value.copy(sun.position.clone().normalize());
+}
+setSunPos();
+setInterval(setSunPos,60000);
+
+// ── Hide loading ──
+function hideLoading(){
+  document.getElementById('loading-bar').style.width='100%';
+  setTimeout(()=>{const ls=document.getElementById('loading-screen');ls.style.opacity='0';setTimeout(()=>ls.style.display='none',600);},200);
+}
+
+// ── Time display ──
+function updateTime(){document.getElementById('time-display').textContent=new Date().toUTCString().replace('GMT','UTC');}
+updateTime(); setInterval(updateTime,1000);
+
+// ── UI bindings ──
+document.getElementById('btn-layers').addEventListener('click',()=>{
+  const p=document.getElementById('layer-panel'),b=document.getElementById('btn-layers');
+  p.classList.toggle('hidden');b.classList.toggle('active');
+});
+document.getElementById('btn-home').addEventListener('click',()=>{tRotX=0;tRotY=0;tDist=2.5;syncSlider();});
+document.getElementById('compass').addEventListener('click',()=>{tRotX=0;tRotY=0;});
+document.getElementById('zoom-in').addEventListener('click',()=>{tDist=Math.max(MIN_D,tDist*0.8);syncSlider();});
+document.getElementById('zoom-out').addEventListener('click',()=>{tDist=Math.min(MAX_D,tDist*1.25);syncSlider();});
+document.getElementById('zoom-slider').addEventListener('input',e=>{tDist=parseFloat(e.target.value);});
+
+document.querySelectorAll('input[name="base"]').forEach(r=>r.addEventListener('change',()=>{
+  state.baseLayer=r.value;
+  if(!earthMesh)return;
+  if(r.value==='night'){earthMesh.material.map=texStore.ngt||makeNightTex();earthMesh.material.needsUpdate=true;if(nightMesh)nightMesh.visible=false;}
+  else{earthMesh.material.map=texStore.sat||makeEarthTex();earthMesh.material.needsUpdate=true;if(nightMesh)nightMesh.visible=state.terminator;}
+}));
+
+[['tog-clouds','clouds',()=>cloudMesh&&(cloudMesh.visible=state.clouds)],
+ ['tog-atmosphere','atmo',()=>atmoMesh&&(atmoMesh.visible=state.atmo)],
+ ['tog-terminator','terminator',()=>nightMesh&&(nightMesh.visible=state.terminator)],
+ ['tog-grid','grid',()=>gridMesh&&(gridMesh.visible=state.grid)],
+ ['tog-cities','cities',()=>cityGroup&&(cityGroup.visible=state.cities)],
+ ['tog-rotate','rotate',()=>{}],
+].forEach(([id,key,cb])=>{
+  const el=document.getElementById(id);
+  if(el) el.addEventListener('change',()=>{state[key]=el.checked;cb();});
 });
 
-/* ─────────────────────────────────────────────────────────────
-   21. KEYBOARD SHORTCUTS
-───────────────────────────────────────────────────────────── */
-document.addEventListener('keydown', e => {
-  if (e.target === searchInput) return;
-  switch (e.key) {
-    case '+': case '=':
-      targetDist = Math.max(MIN_DIST, targetDist * 0.8); updateZoomSlider(); break;
-    case '-':
-      targetDist = Math.min(MAX_DIST, targetDist * 1.25); updateZoomSlider(); break;
-    case 'r': case 'R':
-      targetRotX = 0; targetRotY = 0; targetDist = 2.5; updateZoomSlider(); break;
-    case 'ArrowLeft':
-      targetRotY -= 0.1; break;
-    case 'ArrowRight':
-      targetRotY += 0.1; break;
-    case 'ArrowUp':
-      targetRotX = Math.max(-Math.PI/2, targetRotX - 0.1); break;
-    case 'ArrowDown':
-      targetRotX = Math.min( Math.PI/2, targetRotX + 0.1); break;
-    case '/':
-      searchInput.focus(); e.preventDefault(); break;
-  }
+// ── Search ──
+const PLACES=[...CITIES,
+  {name:'Amazon Rainforest',lat:-3.46,lon:-62.22},{name:'Sahara Desert',lat:23.42,lon:25.66},
+  {name:'Himalayas',lat:27.99,lon:86.93},{name:'Antarctica',lat:-75,lon:0},
+  {name:'Grand Canyon',lat:36.10,lon:-112.11},{name:'Great Barrier Reef',lat:-18.29,lon:147.70},
+  {name:'Mount Everest',lat:27.99,lon:86.93},{name:'Kilimanjaro',lat:-3.07,lon:37.35},
+  {name:'Greenland',lat:72,lon:-40},{name:'Hawaii',lat:21.31,lon:-157.80},
+  {name:'Iceland',lat:64.96,lon:-19.02},{name:'New Zealand',lat:-40.90,lon:174.89},
+];
+const si=document.getElementById('search-input'), sr=document.getElementById('search-results');
+si.addEventListener('input',()=>{
+  const q=si.value.trim().toLowerCase();
+  if(q.length<2){sr.classList.remove('visible');return;}
+  const cm=q.match(/^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/);
+  if(cm){showResults([{name:`${cm[1]}°, ${cm[2]}°`,lat:+cm[1],lon:+cm[2]}]);return;}
+  showResults(PLACES.filter(p=>p.name.toLowerCase().includes(q)).slice(0,8));
+});
+function showResults(res){
+  if(!res.length){sr.classList.remove('visible');return;}
+  sr.innerHTML=res.map(r=>`<div class="search-item" data-lat="${r.lat}" data-lon="${r.lon}"><div class="search-item-name">${r.name}</div><div class="search-item-sub">${r.lat.toFixed(2)}°, ${r.lon.toFixed(2)}°</div></div>`).join('');
+  sr.classList.add('visible');
+  sr.querySelectorAll('.search-item').forEach(el=>el.addEventListener('click',()=>{flyTo(+el.dataset.lat,+el.dataset.lon,1.6);si.value=el.querySelector('.search-item-name').textContent;sr.classList.remove('visible');}));
+}
+document.getElementById('search-btn').addEventListener('click',()=>si.dispatchEvent(new Event('input')));
+si.addEventListener('keydown',e=>{if(e.key==='Enter')si.dispatchEvent(new Event('input'));if(e.key==='Escape')sr.classList.remove('visible');});
+document.addEventListener('click',e=>{if(!e.target.closest('#search-wrapper'))sr.classList.remove('visible');});
+
+document.addEventListener('keydown',e=>{
+  if(e.target===si)return;
+  if(e.key==='+'||e.key==='='){tDist=Math.max(MIN_D,tDist*0.8);syncSlider();}
+  if(e.key==='-'){tDist=Math.min(MAX_D,tDist*1.25);syncSlider();}
+  if(e.key==='r'||e.key==='R'){tRotX=0;tRotY=0;tDist=2.5;syncSlider();}
+  if(e.key==='ArrowLeft')tRotY-=0.1;
+  if(e.key==='ArrowRight')tRotY+=0.1;
+  if(e.key==='ArrowUp')tRotX=Math.max(-Math.PI/2,tRotX-0.1);
+  if(e.key==='ArrowDown')tRotX=Math.min(Math.PI/2,tRotX+0.1);
+  if(e.key==='/')si.focus();
 });
 
-/* ─────────────────────────────────────────────────────────────
-   22. BOOT
-───────────────────────────────────────────────────────────── */
-computeSunPosition();
+window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);});
+
+// ── BOOT ──
 buildEarth();
