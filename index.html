@@ -117,8 +117,16 @@
     <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
   </div>
 
-  <!-- Three.js from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.min.js"></script>
-  <script src="app.js"></script>
+  <!-- Three.js — cdnjs (Cloudflare, most reliable globally) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    // If Three.js failed to load, show error instead of blank loading screen
+    if (typeof THREE === 'undefined') {
+      document.getElementById('loading-text').textContent = 'Error: could not load 3D library. Check your connection and reload.';
+      document.getElementById('loading-bar').style.background = '#ef5350';
+      document.getElementById('loading-bar').style.width = '100%';
+    }
+  </script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

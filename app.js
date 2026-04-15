@@ -1,5 +1,23 @@
 'use strict';
 
+// ── Safety net: always hide loading screen within 6 seconds ──
+if (typeof THREE === 'undefined') { throw new Error('THREE not loaded'); }
+
+window.onerror = function(msg) {
+  const lt = document.getElementById('loading-text');
+  const lb = document.getElementById('loading-bar');
+  if (lt) lt.textContent = 'Error: ' + msg + ' — try reloading';
+  if (lb) { lb.style.background = '#ef5350'; lb.style.width = '100%'; }
+};
+
+setTimeout(function() {
+  const ls = document.getElementById('loading-screen');
+  if (ls && ls.style.display !== 'none') {
+    ls.style.opacity = '0';
+    setTimeout(function() { ls.style.display = 'none'; }, 600);
+  }
+}, 6000);
+
 // ── Scene ──
 const canvas = document.getElementById('earth-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -30,7 +48,7 @@ scene.add(new THREE.AmbientLight(0x112244, 0.5));
 
 // ── Procedural textures (no network required) ──
 function makeEarthTex() {
-  const W = 2048, H = 1024, c = document.createElement('canvas');
+  const W = 1024, H = 512, c = document.createElement('canvas');
   c.width = W; c.height = H;
   const x = c.getContext('2d');
   // Ocean
@@ -72,7 +90,7 @@ function makeEarthTex() {
 }
 
 function makeCloudTex() {
-  const W=1024,H=512,c=document.createElement('canvas');
+  const W=512,H=256,c=document.createElement('canvas');
   c.width=W; c.height=H;
   const x=c.getContext('2d'); x.clearRect(0,0,W,H);
   for(let i=0;i<120;i++){
@@ -84,7 +102,7 @@ function makeCloudTex() {
 }
 
 function makeNightTex() {
-  const W=1024,H=512,c=document.createElement('canvas');
+  const W=512,H=256,c=document.createElement('canvas');
   c.width=W; c.height=H;
   const x=c.getContext('2d'); x.fillStyle='#000005'; x.fillRect(0,0,W,H);
   [[0.195,0.35],[0.165,0.36],[0.145,0.40],[0.105,0.36],[0.49,0.27],[0.515,0.23],
@@ -360,4 +378,4 @@ document.addEventListener('keydown',e=>{
 window.addEventListener('resize',()=>{camera.aspect=window.innerWidth/window.innerHeight;camera.updateProjectionMatrix();renderer.setSize(window.innerWidth,window.innerHeight);});
 
 // ── BOOT ──
-buildEarth();
+try { buildEarth(); } catch(e) { window.onerror(e.message || String(e)); }
