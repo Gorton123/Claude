@@ -117,16 +117,39 @@
     <div id="loading-bar-wrap"><div id="loading-bar"></div></div>
   </div>
 
-  <!-- Three.js — cdnjs (Cloudflare, most reliable globally) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Three.js: try multiple CDNs in order, then launch app -->
   <script>
-    // If Three.js failed to load, show error instead of blank loading screen
-    if (typeof THREE === 'undefined') {
-      document.getElementById('loading-text').textContent = 'Error: could not load 3D library. Check your connection and reload.';
-      document.getElementById('loading-bar').style.background = '#ef5350';
-      document.getElementById('loading-bar').style.width = '100%';
-    }
+    (function() {
+      var CDNS = [
+        'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
+        'https://unpkg.com/three@0.128.0/build/three.min.js',
+        'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js'
+      ];
+      var lt = document.getElementById('loading-text');
+      var lb = document.getElementById('loading-bar');
+
+      function loadApp() {
+        var s = document.createElement('script');
+        s.src = 'app.js?v=5';
+        document.body.appendChild(s);
+      }
+
+      function tryLoad(i) {
+        if (i >= CDNS.length) {
+          lt.textContent = 'Could not load 3D engine. Please check your internet connection and reload.';
+          lb.style.background = '#ef5350';
+          lb.style.width = '100%';
+          return;
+        }
+        var s = document.createElement('script');
+        s.onload = loadApp;
+        s.onerror = function() { tryLoad(i + 1); };
+        s.src = CDNS[i];
+        document.body.appendChild(s);
+      }
+
+      tryLoad(0);
+    })();
   </script>
-  <script src="app.js?v=4"></script>
 </body>
 </html>
