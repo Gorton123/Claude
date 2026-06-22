@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smash Hit</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', sans-serif;
+    user-select: none;
+  }
+  #gameContainer {
+    position: relative;
+    width: 480px;
+    height: 720px;
+  }
+  canvas {
+    display: block;
+    border-radius: 8px;
+    box-shadow: 0 0 60px rgba(0,180,255,0.3);
+  }
+  #ui {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    pointer-events: none;
+    padding: 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    z-index: 10;
+  }
+  #score {
+    color: #fff;
+    font-size: 36px;
+    font-weight: 300;
+    letter-spacing: 4px;
+    text-shadow: 0 0 20px rgba(0,200,255,0.8);
+  }
+  #balls {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    max-width: 140px;
+    justify-content: flex-end;
+  }
+  .ball-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff, #00aaff);
+    box-shadow: 0 0 6px rgba(0,170,255,0.8);
+    transition: opacity 0.3s;
+  }
+  .ball-indicator.used {
+    opacity: 0.15;
+    background: #334;
+    box-shadow: none;
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: rgba(0,5,20,0.85);
+    border-radius: 8px;
+    z-index: 20;
+    backdrop-filter: blur(4px);
+  }
+  #overlay h1 {
+    font-size: 48px;
+    font-weight: 200;
+    letter-spacing: 12px;
+    color: #fff;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    text-shadow: 0 0 30px rgba(0,180,255,1);
+  }
+  #overlay .subtitle {
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+    letter-spacing: 6px;
+    margin-bottom: 48px;
+  }
+  #overlay .final-score {
+    font-size: 72px;
+    font-weight: 100;
+    color: #fff;
+    letter-spacing: 8px;
+    text-shadow: 0 0 40px rgba(0,220,255,1);
+    margin-bottom: 8px;
+  }
+  #overlay .score-label {
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    letter-spacing: 6px;
+    margin-bottom: 48px;
+  }
+  #overlay button {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.3);
+    color: #fff;
+    font-size: 14px;
+    letter-spacing: 6px;
+    padding: 16px 40px;
+    cursor: pointer;
+    text-transform: uppercase;
+    border-radius: 30px;
+    transition: all 0.3s;
+    pointer-events: all;
+  }
+  #overlay button:hover {
+    background: rgba(0,180,255,0.2);
+    border-color: rgba(0,180,255,0.8);
+    box-shadow: 0 0 30px rgba(0,180,255,0.4);
+  }
+  #highscore-display {
+    color: rgba(255,255,255,0.3);
+    font-size: 11px;
+    letter-spacing: 4px;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="canvas" width="480" height="720"></canvas>
+  <div id="ui">
+    <div id="score">0</div>
+    <div id="balls"></div>
+  </div>
+  <div id="overlay">
+    <h1>Smash Hit</h1>
+    <div class="subtitle">TAP TO SHOOT</div>
+    <button id="startBtn">START</button>
+    <div id="highscore-display"></div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const overlay = document.getElementById('overlay');
+const scoreEl = document.getElementById('score');
+const ballsEl = document.getElementById('balls');
+
+// ─── Game state ─────────────────────────────────────────────────────────────
+let state = 'menu'; // menu | playing | dead
+let score = 0;
+let balls = 25;
+let maxBalls = 25;
+let speed = 3.5;
+let distance = 0;
+let highscore = parseInt(localStorage.getItem('smashHighscore') || '0');
+let combo = 0;
+let comboTimer = 0;
+let screenShake = { x: 0, y: 0, intensity: 0 };
+
+// ─── Camera / perspective ────────────────────────────────────────────────────
+const FOV = 500;
+const CAM_Z = 0;
+
+function project(x, y, z) {
+  const dz = z - CAM_Z;
+  if (dz <= 0) return null;
+  const scale = FOV / dz;
+  return { x: W / 2 + x * scale, y: H / 2 + y * scale, scale };
+}
+
+// ─── Particle system ────────────────────────────────────────────────────────
+const particles = [];
+
+function spawnGlassShards(worldX, worldY, worldZ, color, count = 18) {
+  for (let i = 0; i < count; i++) {
+    const speed = Math.random() * 4 + 1;
+    const angle = Math.random() * Math.PI * 2;
+    const tilt = (Math.random() - 0.5) * 2;
+    particles.push({
+      type: 'shard',
+      x: worldX + (Math.random() - 0.5) * 40,
+      y: worldY + (Math.random() - 0.5) * 40,
+      z: worldZ,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed + tilt,
+      vz: (Math.random() - 0.3) * 3,
+      size: Math.random() * 8 + 3,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.3,
+      life: 1,
+      decay: Math.random() * 0.03 + 0.02,
+      color,
+      alpha: 0.85,
+    });
+  }
+  // Sparkle burst
+  for (let i = 0; i < 12; i++) {
+    const speed = Math.random() * 6 + 2;
+    const angle = Math.random() * Math.PI * 2;
+    particles.push({
+      type: 'sparkle',
+      x: worldX,
+      y: worldY,
+      z: worldZ,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      vz: (Math.random() - 0.5) * 2,
+      size: Math.random() * 3 + 1,
+      life: 1,
+      decay: Math.random() * 0.05 + 0.04,
+      color: '#ffffff',
+    });
+  }
+}
+
+function spawnImpactParticles(x, y) {
+  for (let i = 0; i < 8; i++) {
+    const speed = Math.random() * 3 + 1;
+    const angle = Math.random() * Math.PI * 2;
+    particles.push({
+      type: 'impact',
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: Math.random() * 4 + 2,
+      life: 1,
+      decay: 0.06,
+      color: '#ff4422',
+    });
+  }
+}
+
+// ─── Projectiles ─────────────────────────────────────────────────────────────
+const projectiles = [];
+
+function shootBall(targetX, targetY) {
+  if (balls <= 0 || state !== 'playing') return;
+  balls--;
+  updateBallsUI();
+
+  // Compute world direction from screen click
+  const sx = targetX - W / 2;
+  const sy = targetY - H / 2;
+  const shootZ = 800;
+  const worldX = sx * shootZ / FOV;
+  const worldY = sy * shootZ / FOV;
+
+  projectiles.push({
+    x: 0, y: 0, z: 20,
+    vx: worldX / 60,
+    vy: worldY / 60,
+    vz: shootZ / 60,
+    radius: 7,
+    trail: [],
+  });
+}
+
+// ─── Obstacle generation ─────────────────────────────────────────────────────
+const obstacles = [];
+let nextObstacleZ = 600;
+let patternIndex = 0;
+
+const GLASS_COLORS = [
+  { fill: 'rgba(120,200,255,0.18)', stroke: 'rgba(180,230,255,0.7)', glow: 'rgba(100,200,255,0.4)' },
+  { fill: 'rgba(180,120,255,0.18)', stroke: 'rgba(210,180,255,0.7)', glow: 'rgba(160,100,255,0.4)' },
+  { fill: 'rgba(120,255,200,0.18)', stroke: 'rgba(180,255,220,0.7)', glow: 'rgba(100,255,180,0.4)' },
+  { fill: 'rgba(255,180,120,0.18)', stroke: 'rgba(255,210,160,0.7)', glow: 'rgba(255,160,80,0.4)' },
+];
+
+function randomColor() {
+  return GLASS_COLORS[Math.floor(Math.random() * GLASS_COLORS.length)];
+}
+
+function createPanel(x, y, z, w, h, color) {
+  return { type: 'panel', x, y, z, w, h, color, alive: true, cracked: false, crackProgress: 0 };
+}
+
+function spawnPattern() {
+  const z = nextObstacleZ;
+  const t = Math.floor(distance / 200) % 10;
+
+  const patterns = [
+    // Single center panel
+    () => [createPanel(0, 0, z, 160, 180, randomColor())],
+    // Two side panels
+    () => [createPanel(-130, 0, z, 100, 200, randomColor()), createPanel(130, 0, z, 100, 200, randomColor())],
+    // Three panels
+    () => [createPanel(-150, 0, z, 90, 160, randomColor()), createPanel(0, 0, z, 90, 160, randomColor()), createPanel(150, 0, z, 90, 160, randomColor())],
+    // Horizontal bars
+    () => [createPanel(0, -130, z, 300, 60, randomColor()), createPanel(0, 130, z, 300, 60, randomColor())],
+    // Cross
+    () => [createPanel(0, 0, z, 280, 50, randomColor()), createPanel(0, 0, z, 50, 280, randomColor())],
+    // Diagonal cluster
+    () => [createPanel(-80, -80, z, 80, 80, randomColor()), createPanel(80, 80, z, 80, 80, randomColor())],
+    // Wall with gap
+    () => {
+      const col = randomColor();
+      return [createPanel(-110, 0, z, 100, 300, col), createPanel(110, 0, z, 100, 300, col)];
+    },
+    // Diamond-ish
+    () => [createPanel(0, -100, z, 120, 50, randomColor()), createPanel(-80, 0, z, 120, 50, randomColor()), createPanel(80, 0, z, 120, 50, randomColor()), createPanel(0, 100, z, 120, 50, randomColor())],
+    // Single big panel
+    () => [createPanel(0, 0, z, 220, 240, randomColor())],
+    // Mixed
+    () => [createPanel(-90, -60, z, 120, 90, randomColor()), createPanel(90, 60, z, 120, 90, randomColor()), createPanel(0, -10, z, 60, 60, randomColor())],
+  ];
+
+  const idx = (patternIndex + (t > 5 ? Math.floor(Math.random() * 3) : 0)) % patterns.length;
+  const newObs = patterns[idx]();
+  obstacles.push(...newObs);
+  patternIndex = (patternIndex + 1) % patterns.length;
+
+  // Spacing decreases with distance
+  const spacing = Math.max(250, 420 - distance * 0.15);
+  nextObstacleZ += spacing;
+}
+
+// ─── Tunnel / background ─────────────────────────────────────────────────────
+let bgOffset = 0;
+
+function drawBackground() {
+  // Deep space gradient
+  const bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#000814');
+  bgGrad.addColorStop(0.5, '#001030');
+  bgGrad.addColorStop(1, '#000814');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Tunnel grid lines (floor + walls)
+  ctx.save();
+  const tunnelW = 320, tunnelH = 320;
+  const gridDepths = [600, 900, 1200, 1500, 2000, 2800];
+
+  ctx.strokeStyle = 'rgba(0,100,200,0.12)';
+  ctx.lineWidth = 1;
+
+  // Horizontal grid lines receding into distance
+  for (let row = -6; row <= 6; row++) {
+    for (let i = 0; i < gridDepths.length - 1; i++) {
+      const z1 = gridDepths[i] + bgOffset % 300;
+      const z2 = gridDepths[i + 1] + bgOffset % 300;
+      const y = row * (tunnelH / 6);
+      const p1 = project(-tunnelW, y, z1), p2 = project(-tunnelW, y, z2);
+      const p3 = project(tunnelW, y, z1), p4 = project(tunnelW, y, z2);
+      if (p1 && p2) { ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); }
+      if (p3 && p4) { ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke(); }
+    }
+  }
+
+  // Vertical grid lines
+  for (let col = -6; col <= 6; col++) {
+    for (let i = 0; i < gridDepths.length - 1; i++) {
+      const z1 = gridDepths[i] + bgOffset % 300;
+      const z2 = gridDepths[i + 1] + bgOffset % 300;
+      const x = col * (tunnelW / 6);
+      const p1 = project(x, -tunnelH, z1), p2 = project(x, -tunnelH, z2);
+      const p3 = project(x, tunnelH, z1), p4 = project(x, tunnelH, z2);
+      if (p1 && p2) { ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke(); }
+      if (p3 && p4) { ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke(); }
+    }
+  }
+
+  // Ambient glow orbs in the tunnel
+  for (let i = 0; i < 3; i++) {
+    const z = 800 + i * 700;
+    const p = project(0, 0, z + bgOffset * 0.5);
+    if (p) {
+      const r = p.scale * 40;
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 6);
+      grd.addColorStop(0, `rgba(0,120,255,${0.06 - i * 0.015})`);
+      grd.addColorStop(1, 'transparent');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+// ─── Draw glass panel ────────────────────────────────────────────────────────
+function drawPanel(obs) {
+  const hw = obs.w / 2, hh = obs.h / 2;
+  const corners = [
+    project(obs.x - hw, obs.y - hh, obs.z),
+    project(obs.x + hw, obs.y - hh, obs.z),
+    project(obs.x + hw, obs.y + hh, obs.z),
+    project(obs.x - hw, obs.y + hh, obs.z),
+  ];
+  if (corners.some(c => !c)) return;
+  if (corners[0].y > H + 50 && corners[2].y > H + 50) return;
+
+  const c = obs.color;
+  ctx.save();
+
+  // Glow behind panel
+  const cx = (corners[0].x + corners[2].x) / 2;
+  const cy = (corners[0].y + corners[2].y) / 2;
+  const gw = Math.abs(corners[1].x - corners[0].x);
+  const gh = Math.abs(corners[2].y - corners[0].y);
+  const glowGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(gw, gh));
+  glowGrad.addColorStop(0, c.glow.replace('0.4', '0.25'));
+  glowGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath();
+  corners.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.closePath();
+  ctx.fill();
+
+  // Glass fill
+  ctx.beginPath();
+  corners.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.closePath();
+  const panelGrad = ctx.createLinearGradient(corners[0].x, corners[0].y, corners[2].x, corners[2].y);
+  panelGrad.addColorStop(0, c.fill.replace('0.18', '0.25'));
+  panelGrad.addColorStop(0.4, c.fill.replace('0.18', '0.08'));
+  panelGrad.addColorStop(1, c.fill.replace('0.18', '0.22'));
+  ctx.fillStyle = panelGrad;
+  ctx.fill();
+
+  // Glass border
+  ctx.strokeStyle = obs.cracked ? c.stroke.replace('0.7', '0.4') : c.stroke;
+  ctx.lineWidth = corners[0].scale * 1.5 + 0.5;
+  ctx.stroke();
+
+  // Reflection highlight
+  const hlW = (corners[1].x - corners[0].x) * 0.25;
+  const hlH = (corners[3].y - corners[0].y) * 0.6;
+  ctx.beginPath();
+  ctx.moveTo(corners[0].x + hlW * 0.3, corners[0].y + hlH * 0.05);
+  ctx.lineTo(corners[0].x + hlW * 0.8, corners[0].y + hlH * 0.05);
+  ctx.lineTo(corners[0].x + hlW * 0.6, corners[0].y + hlH * 0.75);
+  ctx.lineTo(corners[0].x + hlW * 0.1, corners[0].y + hlH * 0.75);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fill();
+
+  // Crack overlay
+  if (obs.cracked) {
+    drawCracks(corners, obs.crackProgress, c);
+  }
+
+  ctx.restore();
+}
+
+function drawCracks(corners, progress, c) {
+  ctx.save();
+  ctx.clip();
+  const cx = (corners[0].x + corners[1].x) / 2;
+  const cy = (corners[0].y + corners[3].y) / 2;
+  const numCracks = Math.floor(progress * 8) + 3;
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < numCracks; i++) {
+    const angle = (i / numCracks) * Math.PI * 2 + i * 0.4;
+    const len = (40 + Math.random() * 60) * progress;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    let px = cx, py = cy;
+    const segs = 3;
+    for (let s = 0; s < segs; s++) {
+      const segAngle = angle + (Math.random() - 0.5) * 0.5;
+      const segLen = len / segs;
+      px += Math.cos(segAngle) * segLen;
+      py += Math.sin(segAngle) * segLen;
+      ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ─── Draw projectile ─────────────────────────────────────────────────────────
+function drawProjectile(proj) {
+  const p = project(proj.x, proj.y, proj.z);
+  if (!p) return;
+  const r = Math.min(proj.radius * p.scale, 18);
+
+  // Trail
+  for (let i = proj.trail.length - 1; i >= 0; i--) {
+    const t = proj.trail[i];
+    const tp = project(t.x, t.y, t.z);
+    if (!tp) continue;
+    const tr = r * (i / proj.trail.length) * 0.7;
+    const alpha = (i / proj.trail.length) * 0.4;
+    ctx.beginPath();
+    ctx.arc(tp.x, tp.y, tr, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(100,200,255,${alpha})`;
+    ctx.fill();
+  }
+
+  // Ball glow
+  const grd = ctx.createRadialGradient(p.x - r * 0.3, p.y - r * 0.3, 0, p.x, p.y, r * 2.5);
+  grd.addColorStop(0, 'rgba(200,240,255,0.6)');
+  grd.addColorStop(0.5, 'rgba(60,160,255,0.3)');
+  grd.addColorStop(1, 'transparent');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r * 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Ball core
+  const ballGrd = ctx.createRadialGradient(p.x - r * 0.3, p.y - r * 0.35, r * 0.05, p.x, p.y, r);
+  ballGrd.addColorStop(0, '#ffffff');
+  ballGrd.addColorStop(0.3, '#a0d8ff');
+  ballGrd.addColorStop(0.7, '#3080cc');
+  ballGrd.addColorStop(1, '#103060');
+  ctx.fillStyle = ballGrd;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Specular highlight
+  ctx.beginPath();
+  ctx.arc(p.x - r * 0.3, p.y - r * 0.35, r * 0.25, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fill();
+}
+
+// ─── Draw particles ──────────────────────────────────────────────────────────
+function drawParticle(pt) {
+  if (pt.type === 'shard') {
+    const p = project(pt.x, pt.y, pt.z);
+    if (!p) return;
+    const s = pt.size * p.scale * pt.life;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(pt.rotation);
+    ctx.globalAlpha = pt.alpha * pt.life;
+    ctx.fillStyle = pt.color.fill;
+    ctx.strokeStyle = pt.color.stroke;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -s);
+    ctx.lineTo(s * 0.6, s);
+    ctx.lineTo(-s * 0.6, s);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  } else if (pt.type === 'sparkle') {
+    const p = project(pt.x, pt.y, pt.z);
+    if (!p) return;
+    ctx.save();
+    ctx.globalAlpha = pt.life;
+    ctx.fillStyle = '#fff';
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = '#80d8ff';
+    const s = pt.size * p.scale * pt.life;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else if (pt.type === 'impact') {
+    ctx.save();
+    ctx.globalAlpha = pt.life * 0.8;
+    ctx.fillStyle = pt.color;
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, pt.size * pt.life, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  } else if (pt.type === 'scoreText') {
+    ctx.save();
+    ctx.globalAlpha = pt.life;
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.floor(20 * pt.life + 10)}px Segoe UI`;
+    ctx.textAlign = 'center';
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = 'rgba(0,180,255,0.8)';
+    ctx.fillText(pt.text, pt.x, pt.y);
+    ctx.restore();
+  }
+}
+
+// ─── Collision detection ─────────────────────────────────────────────────────
+function checkCollisions() {
+  for (const proj of projectiles) {
+    if (!proj.alive) continue;
+    for (const obs of obstacles) {
+      if (!obs.alive) continue;
+      // Check if projectile is within z-range of panel (±20 units)
+      if (Math.abs(proj.z - obs.z) < 22) {
+        const hw = obs.w / 2 + 5, hh = obs.h / 2 + 5;
+        if (proj.x > obs.x - hw && proj.x < obs.x + hw &&
+            proj.y > obs.y - hh && proj.y < obs.y + hh) {
+          // Hit!
+          proj.alive = false;
+          if (obs.cracked) {
+            destroyPanel(obs);
+          } else {
+            obs.cracked = true;
+            obs.crackProgress = 0.3;
+          }
+          addScreenShake(4);
+        }
+      }
+    }
+  }
+}
+
+function destroyPanel(obs) {
+  obs.alive = false;
+  combo++;
+  comboTimer = 120;
+  const pts = combo >= 3 ? combo * 2 : 1;
+  score += pts;
+  updateScoreUI();
+
+  // Get screen position for score popup
+  const p = project(obs.x, obs.y, obs.z);
+  if (p) {
+    if (combo >= 3) {
+      particles.push({
+        type: 'scoreText',
+        x: p.x, y: p.y,
+        text: `x${combo} COMBO!`,
+        life: 1, decay: 0.018,
+      });
+    }
+    spawnGlassShards(obs.x, obs.y, obs.z, obs.color, 20);
+  }
+
+  // Bonus ball occasionally
+  if (score % 10 === 0 && balls < maxBalls) {
+    balls = Math.min(balls + 3, maxBalls);
+    updateBallsUI();
+  }
+}
+
+// ─── Ball hits end-wall ───────────────────────────────────────────────────────
+function checkBallLost(proj) {
+  if (proj.z > 2500) {
+    proj.alive = false;
+    // Ball was lost — no penalty, but show impact at end
+    const p = project(proj.x, proj.y, 2400);
+    if (p) spawnImpactParticles(p.x, p.y);
+  }
+}
+
+// ─── Screen shake ─────────────────────────────────────────────────────────────
+function addScreenShake(intensity) {
+  screenShake.intensity = Math.max(screenShake.intensity, intensity);
+}
+
+function updateScreenShake() {
+  if (screenShake.intensity > 0) {
+    screenShake.x = (Math.random() - 0.5) * screenShake.intensity * 2;
+    screenShake.y = (Math.random() - 0.5) * screenShake.intensity * 2;
+    screenShake.intensity *= 0.85;
+    if (screenShake.intensity < 0.1) { screenShake.intensity = 0; screenShake.x = 0; screenShake.y = 0; }
+  }
+}
+
+// ─── UI helpers ──────────────────────────────────────────────────────────────
+function updateScoreUI() {
+  scoreEl.textContent = score;
+}
+
+function updateBallsUI() {
+  ballsEl.innerHTML = '';
+  for (let i = 0; i < maxBalls; i++) {
+    const dot = document.createElement('div');
+    dot.className = 'ball-indicator' + (i >= balls ? ' used' : '');
+    ballsEl.appendChild(dot);
+  }
+}
+
+// ─── Game over ────────────────────────────────────────────────────────────────
+function gameOver() {
+  state = 'dead';
+  if (score > highscore) {
+    highscore = score;
+    localStorage.setItem('smashHighscore', highscore);
+  }
+  overlay.innerHTML = `
+    <h1>Game Over</h1>
+    <div class="subtitle">DISTANCE ${Math.floor(distance)}m</div>
+    <div class="final-score">${score}</div>
+    <div class="score-label">SCORE</div>
+    <button id="startBtn">PLAY AGAIN</button>
+    <div id="highscore-display">BEST: ${highscore}</div>
+  `;
+  overlay.style.display = 'flex';
+  document.getElementById('startBtn').addEventListener('click', startGame);
+}
+
+// ─── Start / reset game ───────────────────────────────────────────────────────
+function startGame() {
+  state = 'playing';
+  score = 0;
+  balls = maxBalls;
+  speed = 3.5;
+  distance = 0;
+  combo = 0;
+  comboTimer = 0;
+  bgOffset = 0;
+  nextObstacleZ = 600;
+  patternIndex = 0;
+  obstacles.length = 0;
+  projectiles.length = 0;
+  particles.length = 0;
+  screenShake.intensity = 0;
+
+  updateScoreUI();
+  updateBallsUI();
+  overlay.style.display = 'none';
+
+  // Pre-populate some obstacles
+  for (let i = 0; i < 6; i++) spawnPattern();
+}
+
+// ─── Main loop ────────────────────────────────────────────────────────────────
+let lastTime = 0;
+
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 16.67, 3);
+  lastTime = ts;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (state === 'playing') {
+    // Accelerate over time
+    speed = 3.5 + distance * 0.004;
+    distance += speed * dt * 0.1;
+    bgOffset += speed * dt;
+
+    // Spawn new obstacles ahead
+    // Move existing obstacles closer
+    for (const obs of obstacles) obs.z -= speed * dt;
+    for (const proj of projectiles) {
+      proj.trail.unshift({ x: proj.x, y: proj.y, z: proj.z });
+      if (proj.trail.length > 8) proj.trail.pop();
+      proj.x += proj.vx * dt;
+      proj.y += proj.vy * dt;
+      proj.z += proj.vz * dt;
+    }
+
+    // Spawn when needed
+    while (nextObstacleZ - distance * 10 < 2200) spawnPattern();
+    // Shift nextObstacleZ with movement
+    nextObstacleZ -= speed * dt;
+
+    // Update particles
+    for (const pt of particles) {
+      if (pt.type !== 'scoreText' && pt.type !== 'impact') {
+        pt.x += pt.vx * dt * 0.5;
+        pt.y += pt.vy * dt * 0.5;
+        pt.z += (pt.vz || 0) * dt * 0.5;
+        if (pt.type === 'shard') {
+          pt.vy += 0.15 * dt;
+          pt.rotation += pt.rotSpeed * dt;
+        }
+      } else if (pt.type === 'scoreText') {
+        pt.y -= 1.5 * dt;
+      } else if (pt.type === 'impact') {
+        pt.x += pt.vx * dt;
+        pt.y += pt.vy * dt;
+      }
+      pt.life -= pt.decay * dt;
+    }
+
+    // Combo timer
+    if (comboTimer > 0) {
+      comboTimer -= dt;
+      if (comboTimer <= 0) combo = 0;
+    }
+
+    // Update cracks
+    for (const obs of obstacles) {
+      if (obs.cracked) obs.crackProgress = Math.min(obs.crackProgress + 0.02 * dt, 1);
+    }
+
+    checkCollisions();
+    for (const proj of projectiles) checkBallLost(proj);
+
+    // Cleanup dead
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+      if (obstacles[i].z < -200 || !obstacles[i].alive) {
+        // Obstacle passed player without being hit — lose a ball if fully past
+        if (obstacles[i].z < -50 && !obstacles[i].alive === false && obstacles[i].cracked) {
+          // already destroyed fine
+        }
+        if (!obstacles[i].alive) obstacles.splice(i, 1);
+        else if (obstacles[i].z < -200) obstacles.splice(i, 1);
+      }
+    }
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      if (projectiles[i].alive === false) projectiles.splice(i, 1);
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+
+    // Check game over
+    if (balls <= 0 && projectiles.length === 0) {
+      gameOver();
+      return requestAnimationFrame(loop);
+    }
+
+    updateScreenShake();
+  }
+
+  // ─── Render ───────────────────────────────────────────────────────────────
+  ctx.save();
+  ctx.translate(screenShake.x, screenShake.y);
+
+  drawBackground();
+
+  // Sort obstacles back to front
+  const visibleObs = obstacles.filter(o => o.z > 0 && o.z < 3000).sort((a, b) => b.z - a.z);
+  for (const obs of visibleObs) drawPanel(obs);
+
+  // Particles behind projectiles
+  for (const pt of particles) {
+    if (pt.type !== 'impact' && pt.type !== 'scoreText') drawParticle(pt);
+  }
+
+  for (const proj of projectiles) {
+    if (proj.alive !== false) drawProjectile(proj);
+  }
+
+  // Screen-space particles
+  for (const pt of particles) {
+    if (pt.type === 'impact' || pt.type === 'scoreText') drawParticle(pt);
+  }
+
+  // Vignette
+  const vignette = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.75);
+  vignette.addColorStop(0, 'transparent');
+  vignette.addColorStop(1, 'rgba(0,2,12,0.65)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+
+  // Crosshair
+  if (state === 'playing') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - 12, H / 2);
+    ctx.lineTo(W / 2 + 12, H / 2);
+    ctx.moveTo(W / 2, H / 2 - 12);
+    ctx.lineTo(W / 2, H / 2 + 12);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(W / 2, H / 2, 10, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  requestAnimationFrame(loop);
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+canvas.addEventListener('click', e => {
+  if (state !== 'playing') return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (W / rect.width);
+  const y = (e.clientY - rect.top) * (H / rect.height);
+  shootBall(x, y);
+});
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (state !== 'playing') return;
+  const rect = canvas.getBoundingClientRect();
+  for (const touch of e.changedTouches) {
+    const x = (touch.clientX - rect.left) * (W / rect.width);
+    const y = (touch.clientY - rect.top) * (H / rect.height);
+    shootBall(x, y);
+  }
+}, { passive: false });
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+
+// Show highscore in menu
+if (highscore > 0) {
+  document.getElementById('highscore-display').textContent = `BEST: ${highscore}`;
+}
+
+// Initialize ball indicators
+updateBallsUI();
+
+// Start render loop (idle in menu state)
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
